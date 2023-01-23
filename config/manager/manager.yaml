@@ -41,9 +41,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-      - command:
-        - /manager
-        args:
+      - args:
         - --leader-elect
         image: ghcr.io/appuio/ocp-drain-monitor:latest
         name: manager
