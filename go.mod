@@ -5,9 +5,9 @@ go 1.19
 require (
 	github.com/prometheus/client_golang v1.14.0
 	github.com/stretchr/testify v1.8.1
-	k8s.io/api v0.26.0
-	k8s.io/apimachinery v0.26.0
-	k8s.io/client-go v0.26.0
+	k8s.io/api v0.26.1
+	k8s.io/apimachinery v0.26.1
+	k8s.io/client-go v0.26.1
 	sigs.k8s.io/controller-runtime v0.14.1
 	sigs.k8s.io/controller-tools v0.11.1
 	sigs.k8s.io/kustomize/kustomize/v4 v4.5.7
