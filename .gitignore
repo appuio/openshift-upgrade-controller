@@ -8,8 +8,11 @@
 bin
 testbin/*
 Dockerfile.cross
-
 ocp-drain-monitor
+
+# Goreleaser
+dist/
+.github/release-notes.md
 
 # Test binary, build with `go test -c`
 *.test
