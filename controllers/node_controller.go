@@ -26,6 +26,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+const (
+	// https://github.com/openshift/machine-config-operator/blob/b36482885ba1304e122e7c01c26cd671dfdd0418/pkg/daemon/constants/constants.go#L17
+	// https://github.com/openshift/machine-config-operator/blob/b36482885ba1304e122e7c01c26cd671dfdd0418/pkg/daemon/drain.go#L79
+	// DesiredDrainerAnnotationKey is set by OCP to indicate drain/uncordon requests
+	DesiredDrainerAnnotationKey = "machineconfiguration.openshift.io/desiredDrain"
+	// LastAppliedDrainerAnnotationKey is by OCP to indicate the last request applied
+	LastAppliedDrainerAnnotationKey = "machineconfiguration.openshift.io/lastAppliedDrain"
+)
+
 // NodeReconciler reconciles a Node object
 type NodeReconciler struct {
 	client.Client
@@ -34,20 +43,34 @@ type NodeReconciler struct {
 
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Node object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
+// Reconcile reacts to Node changes and updates the node draining metric.
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	l := log.FromContext(ctx)
 
-	// TODO(user): your logic here
+	var node corev1.Node
+	if err := r.Get(ctx, req.NamespacedName, &node); err != nil {
+		nodeDraining.DeleteLabelValues(req.Name)
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if !node.DeletionTimestamp.IsZero() {
+		nodeDraining.DeleteLabelValues(node.Name)
+		return ctrl.Result{}, nil
+	}
 
+	desiredDrain, ddOk := node.Annotations[DesiredDrainerAnnotationKey]
+	lastAppliedDrain, laOk := node.Annotations[LastAppliedDrainerAnnotationKey]
+	if !ddOk || !laOk {
+		l.Info("Node is missing drain annotations. Not OCP?", "node", node.Name, "desiredDrain", desiredDrain, "lastAppliedDrain", lastAppliedDrain)
+		nodeDraining.DeleteLabelValues(node.Name)
+		return ctrl.Result{}, nil
+	}
+
+	if desiredDrain == lastAppliedDrain {
+		nodeDraining.WithLabelValues(node.Name).Set(0)
+		return ctrl.Result{}, nil
+	}
+
+	nodeDraining.WithLabelValues(node.Name).Set(1)
 	return ctrl.Result{}, nil
 }
 
