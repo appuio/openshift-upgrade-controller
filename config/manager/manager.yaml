@@ -45,7 +45,7 @@ spec:
         - /manager
         args:
         - --leader-elect
-        image: controller:latest
+        image: ghcr.io/appuio/ocp-drain-monitor:latest
         name: manager
         securityContext:
           allowPrivilegeEscalation: false
