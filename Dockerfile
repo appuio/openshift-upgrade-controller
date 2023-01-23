@@ -7,7 +7,7 @@ RUN \
     ca-certificates \
     tzdata
 
-ENTRYPOINT ["appuio-cloud-agent"]
-COPY appuio-cloud-agent /usr/bin/
+ENTRYPOINT ["ocp-drain-monitor"]
+COPY ocp-drain-monitor /usr/bin/
 
 USER 65536:0
