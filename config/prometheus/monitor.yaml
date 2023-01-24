@@ -21,6 +21,11 @@ spec:
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       tlsConfig:
         insecureSkipVerify: true
+      metricRelabelings:
+      - action: keep
+        regex: ocp_drain_monitor_.+
+        sourceLabels:
+        - __name__
   selector:
     matchLabels:
       control-plane: controller-manager
