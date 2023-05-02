@@ -9,5 +9,5 @@ import (
 	// This is basically KubeBuilder
 	_ "sigs.k8s.io/controller-tools/cmd/controller-gen"
 	// To have Kustomize updated via Renovate.
-	_ "sigs.k8s.io/kustomize/kustomize/v4"
+	_ "sigs.k8s.io/kustomize/kustomize/v5"
 )
