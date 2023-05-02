@@ -8,9 +8,13 @@ layout:
 projectName: openshift-upgrade-controller
 repo: github.com/appuio/openshift-upgrade-controller
 resources:
-- controller: true
-  group: core
-  kind: Node
-  path: k8s.io/api/core/v1
-  version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: appuio.io
+  group: managedupgrade
+  kind: ClusterVersion
+  path: github.com/appuio/openshift-upgrade-controller/api/v1beta1
+  version: v1beta1
 version: "3"

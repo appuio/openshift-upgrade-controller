@@ -1,0 +1,12 @@
+apiVersion: managedupgrade.appuio.io/v1beta1
+kind: ClusterVersion
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterversion
+    app.kubernetes.io/instance: clusterversion-sample
+    app.kubernetes.io/part-of: openshift-upgrade-controller
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: openshift-upgrade-controller
+  name: clusterversion-sample
+spec:
+  # TODO(user): Add fields here

@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/controllers"
 	//+kubebuilder:scaffold:imports
 )
@@ -43,6 +44,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
+	utilruntime.Must(managedupgradev1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -92,6 +94,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
+		os.Exit(1)
+	}
+	if err = (&controllers.ClusterVersionReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ClusterVersion")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

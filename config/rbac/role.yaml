@@ -12,3 +12,29 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - clusterversions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - clusterversions/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - clusterversions/status
+  verbs:
+  - get
+  - patch
+  - update
