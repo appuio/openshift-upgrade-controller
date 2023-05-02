@@ -63,6 +63,18 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	defaultNamespace := "default"
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		defaultNamespace = ns
+	}
+
+	var managedUpstreamClusterVersionName, managedUpstreamClusterVersionNamespace string
+	var managedClusterVersionName, managedClusterVersionNamespace string
+	flag.StringVar(&managedUpstreamClusterVersionName, "managed-upstream-cluster-version-name", "version", "The name of the upstream ClusterVersion object to manage.")
+	flag.StringVar(&managedUpstreamClusterVersionNamespace, "managed-upstream-cluster-version-namespace", "openshift-cluster-version", "The namespace of the upstream ClusterVersion object to manage.")
+	flag.StringVar(&managedClusterVersionName, "managed-cluster-version-name", "version", "The name of the ClusterVersion object to manage.")
+	flag.StringVar(&managedClusterVersionNamespace, "managed-cluster-version-namespace", defaultNamespace, "The namespace of the ClusterVersion object to manage.")
+
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -99,6 +111,11 @@ func main() {
 	if err = (&controllers.ClusterVersionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+
+		ManagedUpstreamClusterVersionName:      managedUpstreamClusterVersionName,
+		ManagedUpstreamClusterVersionNamespace: managedUpstreamClusterVersionNamespace,
+		ManagedClusterVersionName:              managedClusterVersionName,
+		ManagedClusterVersionNamespace:         managedClusterVersionNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterVersion")
 		os.Exit(1)

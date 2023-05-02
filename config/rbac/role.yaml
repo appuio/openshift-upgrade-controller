@@ -13,12 +13,20 @@ rules:
   - list
   - watch
 - apiGroups:
+  - config.openshift.io
+  resources:
+  - clusterversions
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - managedupgrade.appuio.io
   resources:
   - clusterversions
   verbs:
-  - create
-  - delete
   - get
   - list
   - patch
