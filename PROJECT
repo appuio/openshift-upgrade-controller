@@ -5,8 +5,8 @@
 domain: appuio.io
 layout:
 - go.kubebuilder.io/v3
-projectName: ocp-drain-monitor
-repo: github.com/appuio/ocp-drain-monitor
+projectName: openshift-upgrade-controller
+repo: github.com/appuio/openshift-upgrade-controller
 resources:
 - controller: true
   group: core

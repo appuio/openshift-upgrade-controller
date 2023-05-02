@@ -6,8 +6,8 @@ metadata:
     app.kubernetes.io/name: namespace
     app.kubernetes.io/instance: system
     app.kubernetes.io/component: manager
-    app.kubernetes.io/created-by: ocp-drain-monitor
-    app.kubernetes.io/part-of: ocp-drain-monitor
+    app.kubernetes.io/created-by: openshift-upgrade-controller
+    app.kubernetes.io/part-of: openshift-upgrade-controller
     app.kubernetes.io/managed-by: kustomize
   name: system
 ---
@@ -21,8 +21,8 @@ metadata:
     app.kubernetes.io/name: deployment
     app.kubernetes.io/instance: controller-manager
     app.kubernetes.io/component: manager
-    app.kubernetes.io/created-by: ocp-drain-monitor
-    app.kubernetes.io/part-of: ocp-drain-monitor
+    app.kubernetes.io/created-by: openshift-upgrade-controller
+    app.kubernetes.io/part-of: openshift-upgrade-controller
     app.kubernetes.io/managed-by: kustomize
 spec:
   selector:
@@ -43,7 +43,7 @@ spec:
       containers:
       - args:
         - --leader-elect
-        image: ghcr.io/appuio/ocp-drain-monitor:latest
+        image: ghcr.io/appuio/openshift-upgrade-controller:latest
         name: manager
         securityContext:
           allowPrivilegeEscalation: false

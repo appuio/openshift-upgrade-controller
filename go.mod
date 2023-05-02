@@ -1,4 +1,4 @@
-module github.com/appuio/ocp-drain-monitor
+module github.com/appuio/openshift-upgrade-controller
 
 go 1.19
 

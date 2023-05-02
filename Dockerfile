@@ -7,7 +7,7 @@ RUN \
     ca-certificates \
     tzdata
 
-ENTRYPOINT ["ocp-drain-monitor"]
-COPY ocp-drain-monitor /usr/bin/
+ENTRYPOINT ["openshift-upgrade-controller"]
+COPY openshift-upgrade-controller /usr/bin/
 
 USER 65536:0

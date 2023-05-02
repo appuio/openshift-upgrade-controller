@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/appuio/ocp-drain-monitor/controllers"
+	"github.com/appuio/openshift-upgrade-controller/controllers"
 	//+kubebuilder:scaffold:imports
 )
 

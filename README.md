@@ -1,6 +1,6 @@
-# ocp-drain-monitor
+# openshift-upgrade-controller
 
-`ocp-drain-monitor` watches OpenShift Nodes and updates the node draining metric.
+`openshift-upgrade-controller` watches OpenShift Nodes and updates the node draining metric.
 The metrics are calculated based on annotations from the [OpenShift machine-config-operator](https://github.com/openshift/machine-config-operator).
 
 ## Getting Started
@@ -17,13 +17,13 @@ kubectl apply -f config/samples/
 2. Build and push your image to the location specified by `IMG`:
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/ocp-drain-monitor:tag
+make docker-build docker-push IMG=<some-registry>/openshift-upgrade-controller:tag
 ```
 
 3. Deploy the controller to the cluster with the image specified by `IMG`:
 
 ```sh
-make deploy IMG=<some-registry>/ocp-drain-monitor:tag
+make deploy IMG=<some-registry>/openshift-upgrade-controller:tag
 ```
 
 ### Uninstall CRDs
