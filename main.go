@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -123,6 +124,11 @@ func main() {
 	if err = (&controllers.UpgradeJobReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+
+		Clock: realClock{},
+
+		ManagedUpstreamClusterVersionName:      managedUpstreamClusterVersionName,
+		ManagedUpstreamClusterVersionNamespace: managedUpstreamClusterVersionNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "UpgradeJob")
 		os.Exit(1)
@@ -130,6 +136,8 @@ func main() {
 	if err = (&controllers.UpgradeConfigReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+
+		Clock: realClock{},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "UpgradeConfig")
 		os.Exit(1)
@@ -150,4 +158,10 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+type realClock struct{}
+
+func (realClock) Now() time.Time {
+	return time.Now()
 }

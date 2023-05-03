@@ -176,6 +176,12 @@ spec:
             type: object
           status:
             description: UpgradeConfigStatus defines the observed state of UpgradeConfig
+            properties:
+              lastScheduledTime:
+                description: LastScheduledTime defines the time when the last upgrade
+                  was scheduled
+                format: date-time
+                type: string
             type: object
         type: object
     served: true

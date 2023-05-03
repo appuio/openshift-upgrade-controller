@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	configv1 "github.com/openshift/api/config/v1"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
 )
@@ -73,4 +74,28 @@ func TestCompareSpecIgnoringDesiredUpdate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsUpgrading(t *testing.T) {
+	assert.True(t, clusterversion.IsUpgrading(configv1.ClusterVersion{
+		Status: configv1.ClusterVersionStatus{
+			Conditions: []configv1.ClusterOperatorStatusCondition{
+				{
+					Type:   configv1.OperatorProgressing,
+					Status: configv1.ConditionTrue,
+				},
+			},
+		},
+	}))
+
+	assert.False(t, clusterversion.IsUpgrading(configv1.ClusterVersion{
+		Status: configv1.ClusterVersionStatus{
+			Conditions: []configv1.ClusterOperatorStatusCondition{
+				{
+					Type:   configv1.OperatorProgressing,
+					Status: configv1.ConditionFalse,
+				},
+			},
+		},
+	}))
 }

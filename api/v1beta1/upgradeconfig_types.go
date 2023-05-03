@@ -46,6 +46,8 @@ type UpgradeConfigSchedule struct {
 
 // UpgradeConfigStatus defines the observed state of UpgradeConfig
 type UpgradeConfigStatus struct {
+	// LastScheduledTime defines the time when the last upgrade was scheduled
+	LastScheduledTime *metav1.Time `json:"lastScheduledTime,omitempty"`
 }
 
 //+kubebuilder:object:root=true

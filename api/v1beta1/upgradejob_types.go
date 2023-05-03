@@ -7,6 +7,26 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	// UpgradeJobConditionFailed is the condition type for a failed upgrade job
+	UpgradeJobConditionFailed = "Failed"
+	// UpgradeJobConditionSucceeded is the condition type for a succeeded upgrade job
+	UpgradeJobConditionSucceeded = "Succeeded"
+	// UpgradeJobConditionStarted is the condition type for a started upgrade job
+	UpgradeJobConditionStarted = "Started"
+	// UpgradeJobConditionPreHealthCheckDone is the condition type for a pre health check done upgrade job
+	UpgradeJobConditionPreHealthCheckDone = "PreHealthCheckDone"
+	// UpgradeJobConditionUpgradeCompleted is the condition type for a started upgrade job
+	UpgradeJobConditionUpgradeCompleted = "UpgradeCompleted"
+	// UpgradeJobConditionPostHealthCheckDone is the condition type for a post health check done upgrade job
+	UpgradeJobConditionPostHealthCheckDone = "PostHealthCheckDone"
+
+	// UpgradeJobReasonFailed is the generic reason for a failed upgrade job
+	UpgradeJobReasonFailed = "Failed"
+	// UpgradeJobReasonExpired is used when the upgrade job is not started before the startBefore time
+	UpgradeJobReasonExpired = "Expired"
+)
+
 // UpgradeJobSpec defines the desired state of UpgradeJob
 type UpgradeJobSpec struct {
 	// StartAfter defines the time after which the upgrade job should start
@@ -44,6 +64,8 @@ type UpgradeJobHealthCheck struct {
 
 // UpgradeJobStatus defines the observed state of UpgradeJob
 type UpgradeJobStatus struct {
+	// Conditions is a list of conditions for the UpgradeJob
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true
