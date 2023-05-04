@@ -42,7 +42,8 @@ var ClusterVersionLockAnnotation = managedupgradev1beta1.GroupVersion.Group + "/
 
 // Reconcile reconciles a UpgradeJob object and starts the upgrade if necessary.
 func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.Reconcile").WithValues("upgrade_job", req.NamespacedName)
+	l.Info("Reconciling UpgradeJob")
 
 	var uj managedupgradev1beta1.UpgradeJob
 	if err := r.Get(ctx, req.NamespacedName, &uj); err != nil {
@@ -52,7 +53,8 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	if apimeta.IsStatusConditionTrue(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded) {
+	if apimeta.IsStatusConditionTrue(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded) ||
+		apimeta.IsStatusConditionTrue(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed) {
 		return ctrl.Result{}, r.cleanupLock(ctx, &uj)
 	}
 
@@ -73,7 +75,7 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, r.Status().Update(ctx, &uj)
 	}
 
-	if now.After(uj.Spec.StartAfter.Time) {
+	if !now.Before(uj.Spec.StartAfter.Time) {
 		apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionStarted,
 			Status:  metav1.ConditionTrue,
@@ -83,7 +85,7 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, r.Status().Update(ctx, &uj)
 	}
 
-	return ctrl.Result{RequeueAfter: uj.Spec.StartAfter.Time.Sub(now)}, nil
+	return ctrl.Result{Requeue: true, RequeueAfter: uj.Spec.StartAfter.Time.Sub(now)}, nil
 }
 
 func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (ctrl.Result, error) {
@@ -112,6 +114,16 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 
 	// Check if the desired version is already set
 	if version.Spec.DesiredUpdate == nil || *version.Spec.DesiredUpdate != uj.Spec.DesiredVersion {
+		update := clusterversion.FindAvailableUpdate(version, uj.Spec.DesiredVersion.Image, uj.Spec.DesiredVersion.Version)
+		if update == nil {
+			apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+				Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
+				Status:  metav1.ConditionTrue,
+				Reason:  managedupgradev1beta1.UpgradeJobReasonUpgradeWithdrawn,
+				Message: fmt.Sprintf("Upgrade became unavailable: %s", uj.Spec.DesiredVersion.Version),
+			})
+			return ctrl.Result{}, r.Status().Update(ctx, uj)
+		}
 		// Start the upgrade
 		version.Spec.DesiredUpdate = &uj.Spec.DesiredVersion
 		if err := r.Update(ctx, &version); err != nil {
@@ -121,19 +133,30 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	}
 
 	// Check if the upgrade is done
-	if apimeta.IsStatusConditionTrue(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted) ||
-		clusterversion.IsVersionUpgradeCompleted(version) {
-
+	upgradedCon := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted)
+	if upgradedCon == nil {
 		apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
-			Status:  metav1.ConditionTrue,
-			Message: "Upgrade completed",
+			Status:  metav1.ConditionFalse,
+			Message: "Upgrade in progress",
 		})
 		return ctrl.Result{}, r.Status().Update(ctx, uj)
 	}
+	if upgradedCon.Status != metav1.ConditionTrue {
+		if clusterversion.IsVersionUpgradeCompleted(version) {
+			apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+				Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
+				Status:  metav1.ConditionTrue,
+				Message: "Upgrade completed",
+			})
+			return ctrl.Result{}, r.Status().Update(ctx, uj)
+		}
+		// TODO(swi): add a timeout
+		return ctrl.Result{}, nil
+	}
 
-	postHealthType := managedupgradev1beta1.UpgradeJobConditionPreHealthCheckDone
-	postHealthConfig := uj.Spec.UpgradeJobConfig.PreUpgradeHealthChecks
+	postHealthType := managedupgradev1beta1.UpgradeJobConditionPostHealthCheckDone
+	postHealthConfig := uj.Spec.UpgradeJobConfig.PostUpgradeHealthChecks
 	ok, err = r.runHealthCheck(ctx, uj, version, postHealthConfig, postHealthType)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to run post-upgrade health checks: %w", err)
@@ -159,7 +182,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 func (r *UpgradeJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&managedupgradev1beta1.UpgradeJob{}).
-		Watches(&source.Kind{Type: &configv1.ClusterVersion{}}, handler.EnqueueRequestsFromMapFunc(mapCVEventToUpgradeJob)).
+		Watches(&source.Kind{Type: &configv1.ClusterVersion{}}, handler.EnqueueRequestsFromMapFunc(MapClusterVersionEventToUpgradeJob)).
 		Complete(r)
 }
 
@@ -185,35 +208,31 @@ func (r *UpgradeJobReconciler) runHealthCheck(
 	if healthCond.Status == metav1.ConditionTrue {
 		return true, nil
 	}
-	if healthConfig.CheckDegradedOperators == true && healthcheck.IsOperatorDegraded(version) {
+	if healthConfig.CheckDegradedOperators && healthcheck.IsOperatorDegraded(version) {
 		// TODO(swi) check for timeout
 		return false, nil
 	}
 	apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
 		Type:    healthConditionType,
 		Status:  metav1.ConditionTrue,
-		Message: "Health checks started",
+		Message: "Health checks ok",
 	})
 	return true, r.Status().Update(ctx, uj)
 }
 
 func (r *UpgradeJobReconciler) cleanupLock(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) error {
-	var version *configv1.ClusterVersion
+	var version configv1.ClusterVersion
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      r.ManagedUpstreamClusterVersionName,
 		Namespace: r.ManagedUpstreamClusterVersionNamespace,
-	}, version); err != nil {
+	}, &version); err != nil {
 		return fmt.Errorf("failed to get cluster version: %w", err)
-	}
-
-	if version.Annotations == nil {
-		return nil
 	}
 
 	lockingJob, hasLockingJob := version.Annotations[ClusterVersionLockAnnotation]
 	if hasLockingJob && lockingJob == uj.Namespace+"/"+uj.Name {
 		delete(version.Annotations, ClusterVersionLockAnnotation)
-		if err := r.Update(ctx, version); err != nil {
+		if err := r.Update(ctx, &version); err != nil {
 			return fmt.Errorf("failed to unlock cluster version: %w", err)
 		}
 	}
@@ -241,8 +260,12 @@ func (r *UpgradeJobReconciler) tryLockClusterVersion(ctx context.Context, versio
 	return nil
 }
 
-// mapCVEventToUpgradeJob maps a cluster version event to the upgrade job that is locking the cluster version
-func mapCVEventToUpgradeJob(o client.Object) []reconcile.Request {
+// MapClusterVersionEventToUpgradeJob maps a cluster version event to the upgrade job that is locking the cluster version
+func MapClusterVersionEventToUpgradeJob(o client.Object) []reconcile.Request {
+	if _, ok := o.(*configv1.ClusterVersion); !ok {
+		return []reconcile.Request{}
+	}
+
 	job := o.GetAnnotations()[ClusterVersionLockAnnotation]
 	if job == "" {
 		return []reconcile.Request{}

@@ -36,3 +36,13 @@ func IsVersionUpgradeCompleted(cv configv1.ClusterVersion) bool {
 
 	return false
 }
+
+// FindAvailableUpdate returns the available update with the given image and version
+func FindAvailableUpdate(cv configv1.ClusterVersion, image, version string) *configv1.Release {
+	for _, update := range cv.Status.AvailableUpdates {
+		if update.Version == version && update.Image == image {
+			return &update
+		}
+	}
+	return nil
+}

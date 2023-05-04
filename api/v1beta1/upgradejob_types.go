@@ -25,6 +25,8 @@ const (
 	UpgradeJobReasonFailed = "Failed"
 	// UpgradeJobReasonExpired is used when the upgrade job is not started before the startBefore time
 	UpgradeJobReasonExpired = "Expired"
+	// UpgradeJobReasonUpgradeWithdrawn is used when the upgrade was retracted by the upstream after the upgrade job was created
+	UpgradeJobReasonUpgradeWithdrawn = "UpgradeBecameUnavailable"
 )
 
 // UpgradeJobSpec defines the desired state of UpgradeJob
