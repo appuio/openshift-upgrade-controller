@@ -108,7 +108,7 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("could not find next run: %w", err)
 	}
-	nextCreateJobWindow := nextRun.Add(-uc.Spec.PinVersionWindow)
+	nextCreateJobWindow := nextRun.Add(-uc.Spec.PinVersionWindow.Duration)
 
 	// check if we are in a scheduling window
 	// if we are not yet in the scheduling window, requeue until we are
@@ -116,7 +116,7 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{RequeueAfter: nextCreateJobWindow.Sub(now)}, nil
 	}
 	// if we are past the scheduling window, do nothing
-	if now.After(nextCreateJobWindow.Add(uc.Spec.MaxSchedulingDelay)) {
+	if now.After(nextCreateJobWindow.Add(uc.Spec.MaxSchedulingDelay.Duration)) {
 		return ctrl.Result{}, nil
 	}
 
@@ -142,14 +142,14 @@ func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConf
 		},
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartAfter:  metav1.NewTime(nextRun),
-			StartBefore: metav1.NewTime(nextRun.Add(uc.Spec.MaxUpgradeStartDelay)),
+			StartBefore: metav1.NewTime(nextRun.Add(uc.Spec.MaxUpgradeStartDelay.Duration)),
 
 			DesiredVersion: configv1.Update{
 				Version: latestUpdate.Version,
 				Image:   latestUpdate.Image,
 			},
 
-			UpgradeJobConfig: uc.Spec.JobTemplate.Spec.UpgradeJobConfig,
+			UpgradeJobConfig: uc.Spec.JobTemplate.Spec.Config,
 		},
 	}
 

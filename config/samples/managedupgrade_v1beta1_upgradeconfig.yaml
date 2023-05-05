@@ -9,4 +9,10 @@ metadata:
     app.kubernetes.io/created-by: openshift-upgrade-controller
   name: upgradeconfig-sample
 spec:
-  # TODO(user): Add fields here
+  schedule:
+    cron: "0 22 * * 2"
+  jobTemplate:
+    spec:
+      config:
+        preUpgradeHealthChecks: {}
+        postUpgradeHealthChecks: {}

@@ -208,7 +208,7 @@ func (r *UpgradeJobReconciler) runHealthCheck(
 	if healthCond.Status == metav1.ConditionTrue {
 		return true, nil
 	}
-	if healthConfig.CheckDegradedOperators && healthcheck.IsOperatorDegraded(version) {
+	if !healthConfig.SkipDegradedOperatorsCheck || healthcheck.IsOperatorDegraded(version) {
 		// TODO(swi) check for timeout
 		return false, nil
 	}

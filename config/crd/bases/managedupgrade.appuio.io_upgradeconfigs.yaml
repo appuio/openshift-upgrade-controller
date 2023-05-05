@@ -38,7 +38,8 @@ spec:
                 description: JobTemplate defines the template for the upgrade job
                 properties:
                   spec:
-                    description: UpgradeJobSpec defines the desired state of UpgradeJob
+                    description: UpgradeConfigJobTemplateSpec defines the desired
+                      state of UpgradeJob
                     properties:
                       config:
                         description: UpgradeJobConfig defines the configuration for
@@ -48,111 +49,74 @@ spec:
                             description: PostUpgradeHealthChecks defines the health
                               checks to be performed after the upgrade
                             properties:
-                              checkDegradedOperators:
-                                description: CheckDegradedOperators defines whether
+                              skipDegradedOperatorsCheck:
+                                description: SkipDegradedOperatorsCheck defines whether
                                   to check the ClusterVersion object for degraded
                                   operators when performing the health check
                                 type: boolean
                               timeout:
+                                default: 30m
                                 description: Timeout defines the timeout after which
                                   the health check is considered failed
-                                format: int64
-                                type: integer
+                                format: duration
+                                type: string
                             required:
-                            - checkDegradedOperators
                             - timeout
                             type: object
                           preUpgradeHealthChecks:
                             description: PreUpgradeHealthChecks defines the health
                               checks to be performed before the upgrade
                             properties:
-                              checkDegradedOperators:
-                                description: CheckDegradedOperators defines whether
+                              skipDegradedOperatorsCheck:
+                                description: SkipDegradedOperatorsCheck defines whether
                                   to check the ClusterVersion object for degraded
                                   operators when performing the health check
                                 type: boolean
                               timeout:
+                                default: 30m
                                 description: Timeout defines the timeout after which
                                   the health check is considered failed
-                                format: int64
-                                type: integer
+                                format: duration
+                                type: string
                             required:
-                            - checkDegradedOperators
                             - timeout
                             type: object
                           upgradeTimeout:
+                            default: 12h
                             description: UpgradeTimeout defines the timeout after
                               which the upgrade is considered failed
-                            format: int64
-                            type: integer
+                            format: duration
+                            type: string
                         required:
                         - postUpgradeHealthChecks
                         - preUpgradeHealthChecks
                         - upgradeTimeout
                         type: object
-                      desiredVersion:
-                        description: DesiredVersion defines the desired version to
-                          upgrade to
-                        properties:
-                          force:
-                            description: force allows an administrator to update to
-                              an image that has failed verification or upgradeable
-                              checks. This option should only be used when the authenticity
-                              of the provided image has been verified out of band
-                              because the provided image will run with full administrative
-                              access to the cluster. Do not use this flag with images
-                              that comes from unknown or potentially malicious sources.
-                            type: boolean
-                          image:
-                            description: image is a container image location that
-                              contains the update. When this field is part of spec,
-                              image is optional if version is specified and the availableUpdates
-                              field contains a matching version.
-                            type: string
-                          version:
-                            description: version is a semantic versioning identifying
-                              the update version. When this field is part of spec,
-                              version is optional if image is specified.
-                            type: string
-                        type: object
-                      startAfter:
-                        description: StartAfter defines the time after which the upgrade
-                          job should start
-                        format: date-time
-                        type: string
-                      startBefore:
-                        description: StartBefore defines the time before which the
-                          upgrade job should start. If the upgrade job is not started
-                          before this time, it is considered failed.
-                        format: date-time
-                        type: string
                     required:
                     - config
-                    - desiredVersion
-                    - startAfter
-                    - startBefore
                     type: object
                 required:
                 - spec
                 type: object
               maxSchedulingDelay:
+                default: 1h
                 description: MaxSchedulingDelay defines the maximum time after which
                   the upgrade job should be scheduled. If the upgrade job is not scheduled
                   before this time, it will not be scheduled.
-                format: int64
-                type: integer
+                format: duration
+                type: string
               maxUpgradeStartDelay:
+                default: 1h
                 description: MaxUpgradeStartDelay defines the maximum time after which
                   the upgrade job should be started. If the upgrade job is not started
                   before this time, it is considered failed.
-                format: int64
-                type: integer
+                format: duration
+                type: string
               pinVersionWindow:
                 description: PinVersionWindow defines the time window before the maintenance
                   window in which the upgrade version is pinned. `UpgradeJobs` are
                   created at `schedule - pinVersionWindow`.
-                format: int64
-                type: integer
+                type: string
               schedule:
                 description: Schedule defines the schedule for the upgrade
                 properties:
@@ -164,26 +128,34 @@ spec:
                     description: IsoWeek defines the week of the year according to
                       ISO 8601 week number to schedule the upgrade. Currently supported
                       values are `@odd` and `@even`.
+                    pattern: ^(@odd|@even|\d{1,2})$
                     type: string
                   location:
+                    default: Local
                     description: Location defines the location to use for the cron
                       schedule. Defaults to the local time zone.
                     type: string
                   suspend:
+                    default: false
                     description: Suspend defines whether the upgrade should be suspended.
                       Defaults to false.
                     type: boolean
                 required:
                 - cron
+                - location
+                - suspend
                 type: object
             required:
             - jobTemplate
             - maxSchedulingDelay
+            - maxUpgradeStartDelay
             - schedule
             type: object
           status:
             description: UpgradeConfigStatus defines the observed state of UpgradeConfig
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

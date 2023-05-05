@@ -56,9 +56,9 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 				IsoWeek:  "@odd",
 				Location: "UTC",
 			},
-			PinVersionWindow:     time.Hour,
-			MaxSchedulingDelay:   time.Minute,
-			MaxUpgradeStartDelay: time.Hour,
+			PinVersionWindow:     metav1.Duration{Duration: time.Hour},
+			MaxSchedulingDelay:   metav1.Duration{Duration: time.Minute},
+			MaxUpgradeStartDelay: metav1.Duration{Duration: time.Hour},
 		},
 	}
 
@@ -78,7 +78,7 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		res, err := subject.Reconcile(ctx, requestForObject(upgradeConfig))
 		require.NoError(t, err)
 		// Tuesday in a week + 14 hours (08:00->22:00) - 1 hour (version pin window)
-		require.Equal(t, (8*24*time.Hour)+(14*time.Hour)-upgradeConfig.Spec.PinVersionWindow, res.RequeueAfter)
+		require.Equal(t, (8*24*time.Hour)+(14*time.Hour)-upgradeConfig.Spec.PinVersionWindow.Duration, res.RequeueAfter)
 		clock.Advance(res.RequeueAfter)
 	})
 
@@ -86,7 +86,7 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeConfig))
 		require.NoError(t, err)
 
-		expectedStartAfter := clock.Now().Add(upgradeConfig.Spec.PinVersionWindow)
+		expectedStartAfter := clock.Now().Add(upgradeConfig.Spec.PinVersionWindow.Duration)
 
 		jobs := listJobs(t, client, upgradeConfig.Namespace)
 		require.Len(t, jobs, 1)
@@ -94,8 +94,8 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 
 		require.Equal(t, "biweekly-maintenance-4-5-13-"+strconv.FormatInt(expectedStartAfter.Unix(), 10), job.Name)
 		requireTimeEqual(t, expectedStartAfter, job.Spec.StartAfter.Time)
-		requireTimeEqual(t, expectedStartAfter.Add(upgradeConfig.Spec.MaxUpgradeStartDelay), job.Spec.StartBefore.Time)
-		require.Equal(t, upgradeConfig.Spec.JobTemplate.Spec.UpgradeJobConfig, job.Spec.UpgradeJobConfig)
+		requireTimeEqual(t, expectedStartAfter.Add(upgradeConfig.Spec.MaxUpgradeStartDelay.Duration), job.Spec.StartBefore.Time)
+		require.Equal(t, upgradeConfig.Spec.JobTemplate.Spec.Config, job.Spec.UpgradeJobConfig)
 		require.Equal(t, configv1.Update{
 			Version: ucv.Status.AvailableUpdates[0].Version,
 			Image:   ucv.Status.AvailableUpdates[0].Image,

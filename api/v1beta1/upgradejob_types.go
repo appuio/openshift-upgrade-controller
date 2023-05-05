@@ -1,8 +1,6 @@
 package v1beta1
 
 import (
-	"time"
-
 	configv1 "github.com/openshift/api/config/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -47,7 +45,10 @@ type UpgradeJobSpec struct {
 // UpgradeJobConfig defines the configuration for the upgrade job
 type UpgradeJobConfig struct {
 	// UpgradeTimeout defines the timeout after which the upgrade is considered failed
-	UpgradeTimeout time.Duration `json:"upgradeTimeout"`
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=duration
+	// +kubebuilder:default:="12h"
+	UpgradeTimeout metav1.Duration `json:"upgradeTimeout"`
 
 	// PreUpgradeHealthChecks defines the health checks to be performed before the upgrade
 	PreUpgradeHealthChecks UpgradeJobHealthCheck `json:"preUpgradeHealthChecks"`
@@ -58,10 +59,14 @@ type UpgradeJobConfig struct {
 // UpgradeJobHealthCheck defines the health checks to be performed
 type UpgradeJobHealthCheck struct {
 	// Timeout defines the timeout after which the health check is considered failed
-	Timeout time.Duration `json:"timeout"`
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=duration
+	// +kubebuilder:default:="30m"
+	Timeout metav1.Duration `json:"timeout"`
 
-	// CheckDegradedOperators defines whether to check the ClusterVersion object for degraded operators when performing the health check
-	CheckDegradedOperators bool `json:"checkDegradedOperators"`
+	// SkipDegradedOperatorsCheck defines whether to check the ClusterVersion object for degraded operators when performing the health check
+	// +optional
+	SkipDegradedOperatorsCheck bool `json:"skipDegradedOperatorsCheck"`
 }
 
 // UpgradeJobStatus defines the observed state of UpgradeJob

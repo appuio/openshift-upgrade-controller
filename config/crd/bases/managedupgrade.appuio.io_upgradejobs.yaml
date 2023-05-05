@@ -42,43 +42,44 @@ spec:
                     description: PostUpgradeHealthChecks defines the health checks
                       to be performed after the upgrade
                     properties:
-                      checkDegradedOperators:
-                        description: CheckDegradedOperators defines whether to check
-                          the ClusterVersion object for degraded operators when performing
-                          the health check
+                      skipDegradedOperatorsCheck:
+                        description: SkipDegradedOperatorsCheck defines whether to
+                          check the ClusterVersion object for degraded operators when
+                          performing the health check
                         type: boolean
                       timeout:
+                        default: 30m
                         description: Timeout defines the timeout after which the health
                           check is considered failed
-                        format: int64
-                        type: integer
+                        format: duration
+                        type: string
                     required:
-                    - checkDegradedOperators
                     - timeout
                     type: object
                   preUpgradeHealthChecks:
                     description: PreUpgradeHealthChecks defines the health checks
                       to be performed before the upgrade
                     properties:
-                      checkDegradedOperators:
-                        description: CheckDegradedOperators defines whether to check
-                          the ClusterVersion object for degraded operators when performing
-                          the health check
+                      skipDegradedOperatorsCheck:
+                        description: SkipDegradedOperatorsCheck defines whether to
+                          check the ClusterVersion object for degraded operators when
+                          performing the health check
                         type: boolean
                       timeout:
+                        default: 30m
                         description: Timeout defines the timeout after which the health
                           check is considered failed
-                        format: int64
-                        type: integer
+                        format: duration
+                        type: string
                     required:
-                    - checkDegradedOperators
                     - timeout
                     type: object
                   upgradeTimeout:
+                    default: 12h
                     description: UpgradeTimeout defines the timeout after which the
                       upgrade is considered failed
-                    format: int64
-                    type: integer
+                    format: duration
+                    type: string
                 required:
                 - postUpgradeHealthChecks
                 - preUpgradeHealthChecks

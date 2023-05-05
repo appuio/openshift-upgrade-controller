@@ -1,8 +1,6 @@
 package v1beta1
 
 import (
-	"time"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -13,22 +11,32 @@ type UpgradeConfigSpec struct {
 	// PinVersionWindow defines the time window before the maintenance window in which the upgrade version is pinned.
 	// `UpgradeJobs` are created at `schedule - pinVersionWindow`.
 	// +optional
-	PinVersionWindow time.Duration `json:"pinVersionWindow"`
+	PinVersionWindow metav1.Duration `json:"pinVersionWindow"`
 	// MaxSchedulingDelay defines the maximum time after which the upgrade job should be scheduled.
 	// If the upgrade job is not scheduled before this time, it will not be scheduled.
-	MaxSchedulingDelay time.Duration `json:"maxSchedulingDelay"`
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=duration
+	// +kubebuilder:default:="1h"
+	MaxSchedulingDelay metav1.Duration `json:"maxSchedulingDelay"`
 	// MaxUpgradeStartDelay defines the maximum time after which the upgrade job should be started.
 	// If the upgrade job is not started before this time, it is considered failed.
-	// +optional
-	MaxUpgradeStartDelay time.Duration `json:"maxUpgradeStartDelay"`
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Format=duration
+	// +kubebuilder:default:="1h"
+	MaxUpgradeStartDelay metav1.Duration `json:"maxUpgradeStartDelay"`
 
 	// JobTemplate defines the template for the upgrade job
 	JobTemplate UpgradeConfigJobTemplate `json:"jobTemplate"`
 }
 
-// UpgradeJobSpec defines the desired state of UpgradeJob
+// UpgradeConfigJobTemplate defines the desired state of UpgradeJob
 type UpgradeConfigJobTemplate struct {
-	Spec UpgradeJobSpec `json:"spec"`
+	Spec UpgradeConfigJobTemplateSpec `json:"spec"`
+}
+
+// UpgradeConfigJobTemplateSpec defines the desired state of UpgradeJob
+type UpgradeConfigJobTemplateSpec struct {
+	Config UpgradeJobConfig `json:"config"`
 }
 
 // UpgradeConfigSchedule defines the schedule for the upgrade
@@ -38,12 +46,13 @@ type UpgradeConfigSchedule struct {
 	// IsoWeek defines the week of the year according to ISO 8601 week number to schedule the upgrade.
 	// Currently supported values are `@odd` and `@even`.
 	// +optional
+	// +kubebuilder:validation:Pattern:=`^(@odd|@even|\d{1,2})$`
 	IsoWeek string `json:"isoWeek"`
 	// Location defines the location to use for the cron schedule. Defaults to the local time zone.
-	// +optional
+	// +kubebuilder:default:=Local
 	Location string `json:"location"`
 	// Suspend defines whether the upgrade should be suspended. Defaults to false.
-	// +optional
+	// +kubebuilder:default:=false
 	Suspend bool `json:"suspend"`
 }
 
@@ -59,8 +68,9 @@ type UpgradeConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   UpgradeConfigSpec   `json:"spec,omitempty"`
-	Status UpgradeConfigStatus `json:"status,omitempty"`
+	Spec UpgradeConfigSpec `json:"spec"`
+	// +optional
+	Status UpgradeConfigStatus `json:"status"`
 }
 
 //+kubebuilder:object:root=true

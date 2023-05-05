@@ -67,10 +67,10 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 			},
 			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
 				PreUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
-					CheckDegradedOperators: true,
+					SkipDegradedOperatorsCheck: true,
 				},
 				PostUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
-					CheckDegradedOperators: true,
+					SkipDegradedOperatorsCheck: true,
 				},
 			},
 		},
@@ -286,6 +286,11 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 			DesiredVersion: configv1.Update{
 				Version: "4.5.13",
 				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
+			},
+			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				PreUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
+					SkipDegradedOperatorsCheck: true,
+				},
 			},
 		},
 	}
