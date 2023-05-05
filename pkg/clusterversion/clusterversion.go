@@ -2,8 +2,10 @@ package clusterversion
 
 import (
 	"reflect"
+	"sort"
 
 	configv1 "github.com/openshift/api/config/v1"
+	"golang.org/x/mod/semver"
 )
 
 // SpecEqualIgnoringDesiredUpdate returns whether the two ClusterVersionSpecs are equal, ignoring the desired update
@@ -45,4 +47,18 @@ func FindAvailableUpdate(cv configv1.ClusterVersion, image, version string) *con
 		}
 	}
 	return nil
+}
+
+// LatestAvailableUpdate returns the latest available update sorted by version
+func LatestAvailableUpdate(cv configv1.ClusterVersion) *configv1.Release {
+	updates := cv.Status.AvailableUpdates
+	if len(updates) == 0 {
+		return nil
+	}
+
+	sort.Slice(updates, func(i, j int) bool {
+		return semver.Compare("v"+updates[i].Version, "v"+updates[j].Version) > 0
+	})
+
+	return &cv.Status.AvailableUpdates[0]
 }

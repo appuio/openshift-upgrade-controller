@@ -138,6 +138,9 @@ func main() {
 		Scheme: mgr.GetScheme(),
 
 		Clock: realClock{},
+
+		ManagedUpstreamClusterVersionName:      managedUpstreamClusterVersionName,
+		ManagedUpstreamClusterVersionNamespace: managedUpstreamClusterVersionNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "UpgradeConfig")
 		os.Exit(1)

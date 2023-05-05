@@ -99,3 +99,72 @@ func TestIsUpgrading(t *testing.T) {
 		},
 	}))
 }
+
+func TestIsVersionUpgradeCompleted(t *testing.T) {
+	desiredImg := "quay.io/openshift-release-dev/ocp-release@sha256:1234"
+	desiredVer := "4.5.23"
+
+	subject := configv1.ClusterVersion{
+		Spec: configv1.ClusterVersionSpec{
+			DesiredUpdate: &configv1.Update{
+				Image:   desiredImg,
+				Version: desiredVer,
+			},
+		},
+	}
+	assert.False(t, clusterversion.IsVersionUpgradeCompleted(subject), "update not in history")
+
+	subject.Status.History = []configv1.UpdateHistory{
+		{
+			State:   configv1.CompletedUpdate,
+			Image:   "otherimg",
+			Version: "otherver",
+		},
+	}
+	assert.False(t, clusterversion.IsVersionUpgradeCompleted(subject), "update not in history")
+
+	subject.Status.History = append(subject.Status.History, configv1.UpdateHistory{
+		State:   configv1.PartialUpdate,
+		Image:   desiredImg,
+		Version: desiredVer,
+	})
+	assert.False(t, clusterversion.IsVersionUpgradeCompleted(subject), "update in history but not completed")
+
+	subject.Status.History[1].State = configv1.CompletedUpdate
+	assert.True(t, clusterversion.IsVersionUpgradeCompleted(subject), "update in history and completed")
+}
+
+func TestFindAvailableUpdate(t *testing.T) {
+	desiredImg := "quay.io/openshift-release-dev/ocp-release@sha256:1234"
+	desiredVer := "4.5.23"
+
+	subject := configv1.ClusterVersion{
+		Status: configv1.ClusterVersionStatus{
+			AvailableUpdates: []configv1.Release{
+				{
+					Image:   "otherimg",
+					Version: "otherver",
+				},
+				{
+					Image:   desiredImg,
+					Version: desiredVer,
+				},
+			},
+		},
+	}
+
+	assert.Nil(t, clusterversion.FindAvailableUpdate(subject, "other other", "other other"))
+	assert.Equal(t, &subject.Status.AvailableUpdates[1], clusterversion.FindAvailableUpdate(subject, desiredImg, desiredVer))
+}
+
+func Test_LatestAvailableUpdate(t *testing.T) {
+	subject := configv1.ClusterVersion{}
+	assert.Nil(t, clusterversion.LatestAvailableUpdate(subject))
+
+	subject.Status.AvailableUpdates = []configv1.Release{
+		{Version: "4.5.12"},
+		{Version: "4.5.23"},
+		{Version: "4.5.3"},
+	}
+	assert.Equal(t, "4.5.23", clusterversion.LatestAvailableUpdate(subject).Version)
+}

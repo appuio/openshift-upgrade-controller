@@ -8,10 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
@@ -19,11 +16,6 @@ import (
 
 func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 	ctx := context.Background()
-
-	scheme := runtime.NewScheme()
-	require.NoError(t, clientgoscheme.AddToScheme(scheme))
-	require.NoError(t, configv1.AddToScheme(scheme))
-	require.NoError(t, managedupgradev1beta1.AddToScheme(scheme))
 
 	upstream := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
@@ -66,14 +58,11 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 		},
 	}
 
-	client := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(upstream, managed).
-		Build()
+	client := controllerClient(t, upstream, managed)
 
 	subject := &ClusterVersionReconciler{
 		Client: client,
-		Scheme: scheme,
+		Scheme: client.Scheme(),
 
 		ManagedUpstreamClusterVersionName:      "version",
 		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",

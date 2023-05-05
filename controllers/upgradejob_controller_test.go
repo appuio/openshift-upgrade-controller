@@ -76,7 +76,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		},
 	}
 
-	client := upgradeJobReconcilerClient(t, ucv, upgradeJob)
+	client := controllerClient(t, ucv, upgradeJob)
 
 	subject := &UpgradeJobReconciler{
 		Client: client,
@@ -94,7 +94,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		require.Equal(t, time.Hour, res.RequeueAfter)
 	})
 
-	clock.Add(time.Hour + time.Minute)
+	clock.Advance(time.Hour + time.Minute)
 
 	step(t, "Start upgrade", func(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
@@ -236,7 +236,7 @@ func Test_UpgradeJobReconciler_Reconcile_Expired(t *testing.T) {
 		},
 	}
 
-	client := upgradeJobReconcilerClient(t, upgradeJob)
+	client := controllerClient(t, upgradeJob)
 
 	subject := &UpgradeJobReconciler{
 		Client: client,
@@ -290,7 +290,7 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 		},
 	}
 
-	client := upgradeJobReconcilerClient(t, ucv, upgradeJob)
+	client := controllerClient(t, ucv, upgradeJob)
 
 	subject := &UpgradeJobReconciler{
 		Client: client,
@@ -379,7 +379,7 @@ func (m mockClock) Now() time.Time {
 	return m.now
 }
 
-func (m *mockClock) Add(d time.Duration) {
+func (m *mockClock) Advance(d time.Duration) {
 	m.now = m.now.Add(d)
 }
 
@@ -397,7 +397,7 @@ func step(t *testing.T, msg string, test func(t *testing.T)) {
 	test(t)
 }
 
-func upgradeJobReconcilerClient(t *testing.T, initObjs ...client.Object) client.WithWatch {
+func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch {
 	t.Helper()
 
 	scheme := runtime.NewScheme()

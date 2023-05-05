@@ -14,6 +14,9 @@ type UpgradeConfigSpec struct {
 	// `UpgradeJobs` are created at `schedule - pinVersionWindow`.
 	// +optional
 	PinVersionWindow time.Duration `json:"pinVersionWindow"`
+	// MaxSchedulingDelay defines the maximum time after which the upgrade job should be scheduled.
+	// If the upgrade job is not scheduled before this time, it will not be scheduled.
+	MaxSchedulingDelay time.Duration `json:"maxSchedulingDelay"`
 	// MaxUpgradeStartDelay defines the maximum time after which the upgrade job should be started.
 	// If the upgrade job is not started before this time, it is considered failed.
 	// +optional
@@ -36,7 +39,7 @@ type UpgradeConfigSchedule struct {
 	// Currently supported values are `@odd` and `@even`.
 	// +optional
 	IsoWeek string `json:"isoWeek"`
-	// Location defines the location to use for the cron schedule. Defaults to UTC.
+	// Location defines the location to use for the cron schedule. Defaults to the local time zone.
 	// +optional
 	Location string `json:"location"`
 	// Suspend defines whether the upgrade should be suspended. Defaults to false.
@@ -46,8 +49,6 @@ type UpgradeConfigSchedule struct {
 
 // UpgradeConfigStatus defines the observed state of UpgradeConfig
 type UpgradeConfigStatus struct {
-	// LastScheduledTime defines the time when the last upgrade was scheduled
-	LastScheduledTime *metav1.Time `json:"lastScheduledTime,omitempty"`
 }
 
 //+kubebuilder:object:root=true
