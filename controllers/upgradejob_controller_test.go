@@ -66,12 +66,9 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
 			},
 			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
-				PreUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
-					SkipDegradedOperatorsCheck: true,
-				},
-				PostUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
-					SkipDegradedOperatorsCheck: true,
-				},
+				UpgradeTimeout:          metav1.Duration{Duration: 12 * time.Hour},
+				PreUpgradeHealthChecks:  managedupgradev1beta1.UpgradeJobHealthCheck{},
+				PostUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{},
 			},
 		},
 	}
@@ -288,6 +285,7 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
 			},
 			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				UpgradeTimeout: metav1.Duration{Duration: 12 * time.Hour},
 				PreUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
 					SkipDegradedOperatorsCheck: true,
 				},
@@ -316,6 +314,204 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 	failedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
 	require.NotNil(t, failedCond, "should set failed condition")
 	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonUpgradeWithdrawn, failedCond.Reason)
+	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+}
+
+func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "version",
+			Namespace: "openshift-cluster-version",
+		},
+		Status: configv1.ClusterVersionStatus{
+			AvailableUpdates: []configv1.Release{{
+				Version: "4.5.13",
+			}},
+		},
+	}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(3 * time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
+			DesiredVersion: configv1.Update{
+				Version: "4.5.13",
+			},
+			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				UpgradeTimeout: metav1.Duration{Duration: time.Hour},
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob)
+
+	subject := &UpgradeJobReconciler{
+		Client: client,
+		Scheme: client.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName:      "version",
+		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+	}
+
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	clock.Advance(2 * time.Hour)
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+
+	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	failedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
+	require.NotNil(t, failedCond, "should set failed condition")
+	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonTimedOut, failedCond.Reason)
+	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+}
+
+func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "version",
+			Namespace: "openshift-cluster-version",
+		},
+		Status: configv1.ClusterVersionStatus{
+			Conditions: []configv1.ClusterOperatorStatusCondition{
+				{
+					Type:   configv1.OperatorDegraded,
+					Status: configv1.ConditionTrue,
+				},
+			},
+		},
+	}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(3 * time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
+			DesiredVersion: configv1.Update{
+				Version: "4.5.13",
+			},
+			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				UpgradeTimeout: metav1.Duration{Duration: 12 * time.Hour},
+				PreUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
+					Timeout: metav1.Duration{Duration: time.Hour},
+				},
+				PostUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
+					Timeout: metav1.Duration{Duration: time.Hour},
+				},
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob)
+
+	subject := &UpgradeJobReconciler{
+		Client: client,
+		Scheme: client.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName:      "version",
+		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+	}
+
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	clock.Advance(2 * time.Hour)
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+
+	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	failedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
+	require.NotNil(t, failedCond, "should set failed condition")
+	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonPreHealthCheckFailed, failedCond.Reason)
+	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+}
+
+func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "version",
+			Namespace: "openshift-cluster-version",
+		},
+		Status: configv1.ClusterVersionStatus{
+			AvailableUpdates: []configv1.Release{
+				{Version: "4.5.13"},
+			},
+			Conditions: []configv1.ClusterOperatorStatusCondition{
+				{
+					Type:   configv1.OperatorDegraded,
+					Status: configv1.ConditionTrue,
+				},
+			},
+			History: []configv1.UpdateHistory{
+				{
+					Version: "4.5.13",
+					State:   configv1.CompletedUpdate,
+				},
+			},
+		},
+	}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(3 * time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
+			DesiredVersion: configv1.Update{
+				Version: "4.5.13",
+			},
+			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				UpgradeTimeout: metav1.Duration{Duration: 12 * time.Hour},
+				PreUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
+					SkipDegradedOperatorsCheck: true,
+				},
+				PostUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
+					Timeout: metav1.Duration{Duration: time.Hour},
+				},
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob)
+
+	subject := &UpgradeJobReconciler{
+		Client: client,
+		Scheme: client.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName:      "version",
+		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+	}
+
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 10)
+	clock.Advance(2 * time.Hour)
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+
+	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	failedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
+	require.NotNil(t, failedCond, "should set failed condition")
+	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonPostHealthCheckFailed, failedCond.Reason)
 	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
 	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
 }

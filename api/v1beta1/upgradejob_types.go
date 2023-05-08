@@ -23,8 +23,14 @@ const (
 	UpgradeJobReasonFailed = "Failed"
 	// UpgradeJobReasonExpired is used when the upgrade job is not started before the startBefore time
 	UpgradeJobReasonExpired = "Expired"
+	// UpgradeJobReasonTimedOut is used when the upgrade job is not completed before the upgradeTimeout time
+	UpgradeJobReasonTimedOut = "TimedOut"
+	// UpgradeJobReasonPreHealthCheckFailed is used when the health check failed
+	UpgradeJobReasonPreHealthCheckFailed = "PreHealthCheckFailed"
+	// UpgradeJobReasonPostHealthCheckFailed is used when the health check failed
+	UpgradeJobReasonPostHealthCheckFailed = "PostHealthCheckFailed"
 	// UpgradeJobReasonUpgradeWithdrawn is used when the upgrade was retracted by the upstream after the upgrade job was created
-	UpgradeJobReasonUpgradeWithdrawn = "UpgradeBecameUnavailable"
+	UpgradeJobReasonUpgradeWithdrawn = "UpgradeWithdrawn"
 )
 
 // UpgradeJobSpec defines the desired state of UpgradeJob
@@ -61,7 +67,7 @@ type UpgradeJobHealthCheck struct {
 	// Timeout defines the timeout after which the health check is considered failed
 	// +kubebuilder:validation:Type=string
 	// +kubebuilder:validation:Format=duration
-	// +kubebuilder:default:="30m"
+	// +kubebuilder:default:="1h"
 	Timeout metav1.Duration `json:"timeout"`
 
 	// SkipDegradedOperatorsCheck defines whether to check the ClusterVersion object for degraded operators when performing the health check

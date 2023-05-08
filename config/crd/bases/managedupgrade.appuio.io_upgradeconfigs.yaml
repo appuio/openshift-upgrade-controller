@@ -55,7 +55,7 @@ spec:
                                   operators when performing the health check
                                 type: boolean
                               timeout:
-                                default: 30m
+                                default: 1h
                                 description: Timeout defines the timeout after which
                                   the health check is considered failed
                                 format: duration
@@ -73,7 +73,7 @@ spec:
                                   operators when performing the health check
                                 type: boolean
                               timeout:
-                                default: 30m
+                                default: 1h
                                 description: Timeout defines the timeout after which
                                   the health check is considered failed
                                 format: duration

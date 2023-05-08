@@ -36,6 +36,8 @@ type UpgradeJobReconciler struct {
 
 var ClusterVersionLockAnnotation = managedupgradev1beta1.GroupVersion.Group + "/upgrade-job"
 
+//+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
+
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs/finalizers,verbs=update
@@ -65,7 +67,7 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	now := r.Clock.Now()
 
 	if now.After(uj.Spec.StartBefore.Time) {
-		apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
 			Status:  metav1.ConditionTrue,
 			Reason:  managedupgradev1beta1.UpgradeJobReasonExpired,
@@ -76,7 +78,7 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if !now.Before(uj.Spec.StartAfter.Time) {
-		apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionStarted,
 			Status:  metav1.ConditionTrue,
 			Message: fmt.Sprintf("Upgrade started at %s", now.Format(time.RFC3339)),
@@ -89,6 +91,17 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (ctrl.Result, error) {
+	startedCond := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted)
+	if r.Clock.Now().After(startedCond.LastTransitionTime.Add(uj.Spec.UpgradeTimeout.Duration)) {
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+			Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
+			Status:  metav1.ConditionTrue,
+			Reason:  managedupgradev1beta1.UpgradeJobReasonTimedOut,
+			Message: fmt.Sprintf("Upgrade timed out after %s", uj.Spec.UpgradeTimeout.Duration.String()),
+		})
+		return ctrl.Result{}, r.Status().Update(ctx, uj)
+	}
+
 	var version configv1.ClusterVersion
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      r.ManagedUpstreamClusterVersionName,
@@ -102,9 +115,10 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, fmt.Errorf("failed to lock cluster version: %w", err)
 	}
 
-	preHealthType := managedupgradev1beta1.UpgradeJobConditionPreHealthCheckDone
-	preHealthConfig := uj.Spec.UpgradeJobConfig.PreUpgradeHealthChecks
-	ok, err := r.runHealthCheck(ctx, uj, version, preHealthConfig, preHealthType)
+	ok, err := r.runHealthCheck(ctx, uj, version,
+		uj.Spec.UpgradeJobConfig.PreUpgradeHealthChecks,
+		managedupgradev1beta1.UpgradeJobConditionPreHealthCheckDone,
+		managedupgradev1beta1.UpgradeJobReasonPreHealthCheckFailed)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to run pre-upgrade health checks: %w", err)
 	}
@@ -116,7 +130,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	if version.Spec.DesiredUpdate == nil || *version.Spec.DesiredUpdate != uj.Spec.DesiredVersion {
 		update := clusterversion.FindAvailableUpdate(version, uj.Spec.DesiredVersion.Image, uj.Spec.DesiredVersion.Version)
 		if update == nil {
-			apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+			r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 				Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
 				Status:  metav1.ConditionTrue,
 				Reason:  managedupgradev1beta1.UpgradeJobReasonUpgradeWithdrawn,
@@ -135,7 +149,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	// Check if the upgrade is done
 	upgradedCon := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted)
 	if upgradedCon == nil {
-		apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
 			Status:  metav1.ConditionFalse,
 			Message: "Upgrade in progress",
@@ -144,7 +158,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	}
 	if upgradedCon.Status != metav1.ConditionTrue {
 		if clusterversion.IsVersionUpgradeCompleted(version) {
-			apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+			r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 				Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
 				Status:  metav1.ConditionTrue,
 				Message: "Upgrade completed",
@@ -155,9 +169,10 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, nil
 	}
 
-	postHealthType := managedupgradev1beta1.UpgradeJobConditionPostHealthCheckDone
-	postHealthConfig := uj.Spec.UpgradeJobConfig.PostUpgradeHealthChecks
-	ok, err = r.runHealthCheck(ctx, uj, version, postHealthConfig, postHealthType)
+	ok, err = r.runHealthCheck(ctx, uj, version,
+		uj.Spec.UpgradeJobConfig.PostUpgradeHealthChecks,
+		managedupgradev1beta1.UpgradeJobConditionPostHealthCheckDone,
+		managedupgradev1beta1.UpgradeJobReasonPostHealthCheckFailed)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to run post-upgrade health checks: %w", err)
 	}
@@ -166,7 +181,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	}
 
 	// Set the upgrade as successful
-	apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+	r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 		Type:    managedupgradev1beta1.UpgradeJobConditionSucceeded,
 		Status:  metav1.ConditionTrue,
 		Message: "Upgrade succeeded",
@@ -186,6 +201,12 @@ func (r *UpgradeJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// setStatusCondition is a wrapper for apimeta.SetStatusCondition that sets the LastTransitionTime to r.Clock.Now().
+func (r *UpgradeJobReconciler) setStatusCondition(conditions *[]metav1.Condition, newCondition metav1.Condition) {
+	newCondition.LastTransitionTime = metav1.NewTime(r.Clock.Now())
+	apimeta.SetStatusCondition(conditions, newCondition)
+}
+
 // runHealthCheck runs the health check for the given health check type and returns true if the health check is done.
 func (r *UpgradeJobReconciler) runHealthCheck(
 	ctx context.Context,
@@ -193,12 +214,13 @@ func (r *UpgradeJobReconciler) runHealthCheck(
 	version configv1.ClusterVersion,
 	healthConfig managedupgradev1beta1.UpgradeJobHealthCheck,
 	healthConditionType string,
+	jobHealthFailedReason string,
 ) (bool, error) {
 
 	healthCond := apimeta.FindStatusCondition(uj.Status.Conditions, healthConditionType)
 	if healthCond == nil {
 		// Record the start of the health checks for time-out purposes
-		apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    healthConditionType,
 			Status:  metav1.ConditionFalse,
 			Message: "Health checks started",
@@ -208,11 +230,20 @@ func (r *UpgradeJobReconciler) runHealthCheck(
 	if healthCond.Status == metav1.ConditionTrue {
 		return true, nil
 	}
-	if !healthConfig.SkipDegradedOperatorsCheck || healthcheck.IsOperatorDegraded(version) {
-		// TODO(swi) check for timeout
+	healthy := healthConfig.SkipDegradedOperatorsCheck || !healthcheck.IsOperatorDegraded(version)
+	if !healthy {
+		if r.Clock.Now().After(healthCond.LastTransitionTime.Add(healthConfig.Timeout.Duration)) {
+			r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+				Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
+				Status:  metav1.ConditionTrue,
+				Reason:  jobHealthFailedReason,
+				Message: fmt.Sprintf("Health checks timed out after %s", healthConfig.Timeout.Duration.String()),
+			})
+			return false, r.Status().Update(ctx, uj)
+		}
 		return false, nil
 	}
-	apimeta.SetStatusCondition(&uj.Status.Conditions, metav1.Condition{
+	r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 		Type:    healthConditionType,
 		Status:  metav1.ConditionTrue,
 		Message: "Health checks ok",
