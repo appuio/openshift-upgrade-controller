@@ -44,7 +44,7 @@ var ClusterVersionLockAnnotation = managedupgradev1beta1.GroupVersion.Group + "/
 
 // Reconcile reconciles a UpgradeJob object and starts the upgrade if necessary.
 func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.Reconcile").WithValues("upgrade_job", req.NamespacedName)
+	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.Reconcile")
 	l.Info("Reconciling UpgradeJob")
 
 	var uj managedupgradev1beta1.UpgradeJob
@@ -81,6 +81,7 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionStarted,
 			Status:  metav1.ConditionTrue,
+			Reason:  managedupgradev1beta1.UpgradeJobReasonStarted,
 			Message: fmt.Sprintf("Upgrade started at %s", now.Format(time.RFC3339)),
 		})
 
@@ -152,6 +153,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
 			Status:  metav1.ConditionFalse,
+			Reason:  managedupgradev1beta1.UpgradeJobReasonInProgress,
 			Message: "Upgrade in progress",
 		})
 		return ctrl.Result{}, r.Status().Update(ctx, uj)
@@ -161,6 +163,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 			r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 				Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
 				Status:  metav1.ConditionTrue,
+				Reason:  managedupgradev1beta1.UpgradeJobReasonCompleted,
 				Message: "Upgrade completed",
 			})
 			return ctrl.Result{}, r.Status().Update(ctx, uj)
@@ -184,6 +187,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 		Type:    managedupgradev1beta1.UpgradeJobConditionSucceeded,
 		Status:  metav1.ConditionTrue,
+		Reason:  managedupgradev1beta1.UpgradeJobReasonSucceeded,
 		Message: "Upgrade succeeded",
 	})
 	if err := r.Status().Update(ctx, uj); err != nil {
@@ -224,6 +228,7 @@ func (r *UpgradeJobReconciler) runHealthCheck(
 			Type:    healthConditionType,
 			Status:  metav1.ConditionFalse,
 			Message: "Health checks started",
+			Reason:  managedupgradev1beta1.UpgradeJobReasonInProgress,
 		})
 		return false, r.Status().Update(ctx, uj)
 	}
@@ -247,6 +252,7 @@ func (r *UpgradeJobReconciler) runHealthCheck(
 		Type:    healthConditionType,
 		Status:  metav1.ConditionTrue,
 		Message: "Health checks ok",
+		Reason:  managedupgradev1beta1.UpgradeJobReasonCompleted,
 	})
 	return true, r.Status().Update(ctx, uj)
 }

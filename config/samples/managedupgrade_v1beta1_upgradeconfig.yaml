@@ -9,10 +9,16 @@ metadata:
     app.kubernetes.io/created-by: openshift-upgrade-controller
   name: upgradeconfig-sample
 spec:
+  maxSchedulingDelay: 1h
+  maxUpgradeStartDelay: 1h
   schedule:
-    cron: "0 22 * * 2"
+    cron: "0 14 * * *"
+    location: Local
   jobTemplate:
     spec:
       config:
-        preUpgradeHealthChecks: {}
-        postUpgradeHealthChecks: {}
+        upgradeTimeout: 12h
+        preUpgradeHealthChecks:
+          timeout: 1h
+        postUpgradeHealthChecks:
+          timeout: 1h

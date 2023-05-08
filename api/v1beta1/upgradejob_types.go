@@ -31,6 +31,14 @@ const (
 	UpgradeJobReasonPostHealthCheckFailed = "PostHealthCheckFailed"
 	// UpgradeJobReasonUpgradeWithdrawn is used when the upgrade was retracted by the upstream after the upgrade job was created
 	UpgradeJobReasonUpgradeWithdrawn = "UpgradeWithdrawn"
+	// UpgradeJobReasonStarted is used when a step of the upgrade job was started
+	UpgradeJobReasonStarted = "Started"
+	// UpgradeJobReasonSucceeded is used when a step of the upgrade job did succeed
+	UpgradeJobReasonSucceeded = "Succeeded"
+	// UpgradeJobReasonCompleted is used when a step of the upgrade job did succeed
+	UpgradeJobReasonCompleted = "Completed"
+	// UpgradeJobReasonInProgress is used when the pre health check was done
+	UpgradeJobReasonInProgress = "InProgress"
 )
 
 // UpgradeJobSpec defines the desired state of UpgradeJob

@@ -136,14 +136,12 @@ spec:
                       schedule. Defaults to the local time zone.
                     type: string
                   suspend:
-                    default: false
                     description: Suspend defines whether the upgrade should be suspended.
                       Defaults to false.
                     type: boolean
                 required:
                 - cron
                 - location
-                - suspend
                 type: object
             required:
             - jobTemplate

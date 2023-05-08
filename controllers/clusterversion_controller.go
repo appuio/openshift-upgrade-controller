@@ -37,7 +37,8 @@ type ClusterVersionReconciler struct {
 
 // Reconcile compares the ClusterVersion object with the upstream ClusterVersion object and updates the upstream ClusterVersion object if necessary.
 func (r *ClusterVersionReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
-	l := log.FromContext(ctx)
+	l := log.FromContext(ctx).WithName("ClusterVersionReconciler.Reconcile")
+	l.Info("Reconciling ClusterVersion")
 
 	var version managedupgradev1beta1.ClusterVersion
 	if err := r.Get(ctx, types.NamespacedName{

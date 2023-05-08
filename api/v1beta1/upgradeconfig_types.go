@@ -52,7 +52,7 @@ type UpgradeConfigSchedule struct {
 	// +kubebuilder:default:=Local
 	Location string `json:"location"`
 	// Suspend defines whether the upgrade should be suspended. Defaults to false.
-	// +kubebuilder:default:=false
+	// +optional
 	Suspend bool `json:"suspend"`
 }
 

@@ -46,7 +46,7 @@ type UpgradeConfigReconciler struct {
 // Reconcile implements the reconcile loop for UpgradeConfig.
 // It schedules UpgradeJobs based on the UpgradeConfig's schedule - if an update is available.
 func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	l := log.FromContext(ctx).WithName("UpgradeConfigReconciler.Reconcile").WithValues("upgrade_config", req.NamespacedName)
+	l := log.FromContext(ctx).WithName("UpgradeConfigReconciler.Reconcile")
 	l.Info("Reconciling UpgradeConfig")
 
 	var uc managedupgradev1beta1.UpgradeConfig
