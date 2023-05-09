@@ -46,7 +46,7 @@ func Test_NodeReconciler_Reconcile(t *testing.T) {
 	_, err = subject.Reconcile(ctx, requestFor("node1"))
 	require.NoError(t, err)
 	require.Equal(t, 0,
-		testutil.CollectAndCount(nodeDraining, "ocp_drain_monitor_node_draining"),
+		testutil.CollectAndCount(nodeDraining, "openshift_upgrade_controller_node_draining"),
 		"metric should be removed if not able to calculate it")
 }
 

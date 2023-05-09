@@ -23,7 +23,7 @@ spec:
         insecureSkipVerify: true
       metricRelabelings:
       - action: keep
-        regex: ocp_drain_monitor_.+
+        regex: openshift_upgrade_controller_.+
         sourceLabels:
         - __name__
   selector:

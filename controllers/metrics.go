@@ -5,10 +5,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
+const MetricsNamespace = "openshift_upgrade_controller"
+
 var (
 	nodeDraining = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "ocp_drain_monitor",
+			Namespace: MetricsNamespace,
 			Name:      "node_draining",
 			Help:      "Node draining status",
 		},
