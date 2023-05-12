@@ -166,7 +166,6 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 			})
 			return ctrl.Result{}, r.Status().Update(ctx, uj)
 		}
-		// TODO(swi): add a timeout
 		return ctrl.Result{}, nil
 	}
 
