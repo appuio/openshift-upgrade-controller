@@ -71,10 +71,9 @@ func main() {
 		defaultNamespace = ns
 	}
 
-	var managedUpstreamClusterVersionName, managedUpstreamClusterVersionNamespace string
+	var managedUpstreamClusterVersionName string
 	var managedClusterVersionName, managedClusterVersionNamespace string
 	flag.StringVar(&managedUpstreamClusterVersionName, "managed-upstream-cluster-version-name", "version", "The name of the upstream ClusterVersion object to manage.")
-	flag.StringVar(&managedUpstreamClusterVersionNamespace, "managed-upstream-cluster-version-namespace", "openshift-cluster-version", "The namespace of the upstream ClusterVersion object to manage.")
 	flag.StringVar(&managedClusterVersionName, "managed-cluster-version-name", "version", "The name of the ClusterVersion object to manage.")
 	flag.StringVar(&managedClusterVersionNamespace, "managed-cluster-version-namespace", defaultNamespace, "The namespace of the ClusterVersion object to manage.")
 
@@ -115,10 +114,9 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 
-		ManagedUpstreamClusterVersionName:      managedUpstreamClusterVersionName,
-		ManagedUpstreamClusterVersionNamespace: managedUpstreamClusterVersionNamespace,
-		ManagedClusterVersionName:              managedClusterVersionName,
-		ManagedClusterVersionNamespace:         managedClusterVersionNamespace,
+		ManagedUpstreamClusterVersionName: managedUpstreamClusterVersionName,
+		ManagedClusterVersionName:         managedClusterVersionName,
+		ManagedClusterVersionNamespace:    managedClusterVersionNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterVersion")
 		os.Exit(1)
@@ -129,8 +127,7 @@ func main() {
 
 		Clock: realClock{},
 
-		ManagedUpstreamClusterVersionName:      managedUpstreamClusterVersionName,
-		ManagedUpstreamClusterVersionNamespace: managedUpstreamClusterVersionNamespace,
+		ManagedUpstreamClusterVersionName: managedUpstreamClusterVersionName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "UpgradeJob")
 		os.Exit(1)
@@ -141,8 +138,7 @@ func main() {
 
 		Clock: realClock{},
 
-		ManagedUpstreamClusterVersionName:      managedUpstreamClusterVersionName,
-		ManagedUpstreamClusterVersionNamespace: managedUpstreamClusterVersionNamespace,
+		ManagedUpstreamClusterVersionName: managedUpstreamClusterVersionName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "UpgradeConfig")
 		os.Exit(1)

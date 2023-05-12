@@ -27,8 +27,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 
 	ucv := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "openshift-cluster-version",
+			Name: "version",
 		},
 		Spec: configv1.ClusterVersionSpec{
 			ClusterID: "9b588658-9671-429c-a762-34106da5795f",
@@ -81,8 +80,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 
 		Clock: &clock,
 
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+		ManagedUpstreamClusterVersionName: "version",
 	}
 
 	step(t, "Scheduled too early", func(t *testing.T) {
@@ -241,8 +239,7 @@ func Test_UpgradeJobReconciler_Reconcile_Expired(t *testing.T) {
 
 		Clock: &clock,
 
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+		ManagedUpstreamClusterVersionName: "version",
 	}
 
 	_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
@@ -259,8 +256,7 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 
 	ucv := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "openshift-cluster-version",
+			Name: "version",
 		},
 		Spec: configv1.ClusterVersionSpec{
 			ClusterID: "9b588658-9671-429c-a762-34106da5795f",
@@ -301,8 +297,7 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 
 		Clock: &clock,
 
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+		ManagedUpstreamClusterVersionName: "version",
 	}
 
 	for i := 0; i < 10; i++ {
@@ -324,8 +319,7 @@ func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
 
 	ucv := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "openshift-cluster-version",
+			Name: "version",
 		},
 		Status: configv1.ClusterVersionStatus{
 			AvailableUpdates: []configv1.Release{{
@@ -359,8 +353,7 @@ func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
 
 		Clock: &clock,
 
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+		ManagedUpstreamClusterVersionName: "version",
 	}
 
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
@@ -381,8 +374,7 @@ func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
 
 	ucv := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "openshift-cluster-version",
+			Name: "version",
 		},
 		Status: configv1.ClusterVersionStatus{
 			Conditions: []configv1.ClusterOperatorStatusCondition{
@@ -425,8 +417,7 @@ func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
 
 		Clock: &clock,
 
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+		ManagedUpstreamClusterVersionName: "version",
 	}
 
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
@@ -447,8 +438,7 @@ func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
 
 	ucv := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "openshift-cluster-version",
+			Name: "version",
 		},
 		Status: configv1.ClusterVersionStatus{
 			AvailableUpdates: []configv1.Release{
@@ -500,8 +490,7 @@ func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
 
 		Clock: &clock,
 
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+		ManagedUpstreamClusterVersionName: "version",
 	}
 
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 10)

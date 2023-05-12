@@ -24,8 +24,7 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 
 	ucv := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "openshift-cluster-version",
+			Name: "version",
 		},
 		Spec: configv1.ClusterVersionSpec{
 			ClusterID: "9b588658-9671-429c-a762-34106da5795f",
@@ -70,8 +69,7 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 
 		Clock: &clock,
 
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
+		ManagedUpstreamClusterVersionName: "version",
 	}
 
 	step(t, "not in job creation window", func(t *testing.T) {

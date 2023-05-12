@@ -23,10 +23,9 @@ type ClusterVersionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	ManagedUpstreamClusterVersionName      string
-	ManagedUpstreamClusterVersionNamespace string
-	ManagedClusterVersionName              string
-	ManagedClusterVersionNamespace         string
+	ManagedUpstreamClusterVersionName string
+	ManagedClusterVersionName         string
+	ManagedClusterVersionNamespace    string
 }
 
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
@@ -53,8 +52,7 @@ func (r *ClusterVersionReconciler) Reconcile(ctx context.Context, _ ctrl.Request
 
 	var upstreamVersion configv1.ClusterVersion
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      r.ManagedUpstreamClusterVersionName,
-		Namespace: r.ManagedUpstreamClusterVersionNamespace,
+		Name: r.ManagedUpstreamClusterVersionName,
 	}, &upstreamVersion); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get upstream cluster version: %w", err)
 	}
@@ -83,7 +81,7 @@ func (r *ClusterVersionReconciler) Filter(obj client.Object) bool {
 	case *managedupgradev1beta1.ClusterVersion:
 		return r.ManagedClusterVersionName == obj.GetName() && r.ManagedClusterVersionNamespace == obj.GetNamespace()
 	case *configv1.ClusterVersion:
-		return r.ManagedUpstreamClusterVersionName == obj.GetName() && r.ManagedUpstreamClusterVersionNamespace == obj.GetNamespace()
+		return r.ManagedUpstreamClusterVersionName == obj.GetName()
 	}
 	return false
 }

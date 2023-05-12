@@ -19,8 +19,7 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 
 	upstream := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "openshift-cluster-version",
+			Name: "version",
 		},
 		Spec: configv1.ClusterVersionSpec{
 			ClusterID: "9b588658-9671-429c-a762-34106da5795f",
@@ -64,17 +63,16 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 		Client: client,
 		Scheme: client.Scheme(),
 
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
-		ManagedClusterVersionName:              "version",
-		ManagedClusterVersionNamespace:         "appuio-openshift-upgrade-controller",
+		ManagedUpstreamClusterVersionName: "version",
+		ManagedClusterVersionName:         "version",
+		ManagedClusterVersionNamespace:    "appuio-openshift-upgrade-controller",
 	}
 
 	_, err := subject.Reconcile(ctx, reconcile.Request{})
 	require.NoError(t, err)
 
 	updatedUpstream := &configv1.ClusterVersion{}
-	err = client.Get(ctx, types.NamespacedName{Name: "version", Namespace: "openshift-cluster-version"}, updatedUpstream)
+	err = client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream)
 	require.NoError(t, err)
 
 	require.Equal(t, upstream.Spec.DesiredUpdate, updatedUpstream.Spec.DesiredUpdate, "DesiredUpdate should not be managed")
@@ -86,25 +84,17 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 
 func Test_ClusterVersionReconciler_Filter(t *testing.T) {
 	subject := &ClusterVersionReconciler{
-		ManagedUpstreamClusterVersionName:      "version",
-		ManagedUpstreamClusterVersionNamespace: "openshift-cluster-version",
-		ManagedClusterVersionName:              "version",
-		ManagedClusterVersionNamespace:         "appuio-openshift-upgrade-controller",
+		ManagedUpstreamClusterVersionName: "version",
+		ManagedClusterVersionName:         "version",
+		ManagedClusterVersionNamespace:    "appuio-openshift-upgrade-controller",
 	}
 
 	require.True(t, subject.Filter(&configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "openshift-cluster-version",
+			Name: "version",
 		},
 	}))
 	require.True(t, subject.Filter(&managedupgradev1beta1.ClusterVersion{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "version",
-			Namespace: "appuio-openshift-upgrade-controller",
-		},
-	}))
-	require.False(t, subject.Filter(&configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "version",
 			Namespace: "appuio-openshift-upgrade-controller",

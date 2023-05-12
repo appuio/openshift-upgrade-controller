@@ -30,8 +30,7 @@ type UpgradeJobReconciler struct {
 
 	Clock Clock
 
-	ManagedUpstreamClusterVersionName      string
-	ManagedUpstreamClusterVersionNamespace string
+	ManagedUpstreamClusterVersionName string
 }
 
 var ClusterVersionLockAnnotation = managedupgradev1beta1.GroupVersion.Group + "/upgrade-job"
@@ -105,8 +104,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 
 	var version configv1.ClusterVersion
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      r.ManagedUpstreamClusterVersionName,
-		Namespace: r.ManagedUpstreamClusterVersionNamespace,
+		Name: r.ManagedUpstreamClusterVersionName,
 	}, &version); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get cluster version: %w", err)
 	}
@@ -260,8 +258,7 @@ func (r *UpgradeJobReconciler) runHealthCheck(
 func (r *UpgradeJobReconciler) cleanupLock(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) error {
 	var version configv1.ClusterVersion
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      r.ManagedUpstreamClusterVersionName,
-		Namespace: r.ManagedUpstreamClusterVersionNamespace,
+		Name: r.ManagedUpstreamClusterVersionName,
 	}, &version); err != nil {
 		return fmt.Errorf("failed to get cluster version: %w", err)
 	}

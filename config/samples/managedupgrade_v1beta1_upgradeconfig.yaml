@@ -8,12 +8,13 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/created-by: openshift-upgrade-controller
   name: upgradeconfig-sample
+  namespace: appuio-openshift-upgrade-controller
 spec:
   maxSchedulingDelay: 1h
   maxUpgradeStartDelay: 1h
   schedule:
-    cron: "0 14 * * *"
-    location: Local
+    cron: "0 10 * * 2"
+    location: Europe/Zurich
   jobTemplate:
     spec:
       config:

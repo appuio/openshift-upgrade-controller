@@ -33,8 +33,7 @@ type UpgradeConfigReconciler struct {
 
 	Clock Clock
 
-	ManagedUpstreamClusterVersionName      string
-	ManagedUpstreamClusterVersionNamespace string
+	ManagedUpstreamClusterVersionName string
 }
 
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
@@ -116,7 +115,7 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	var cv configv1.ClusterVersion
-	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: r.ManagedUpstreamClusterVersionNamespace, Name: r.ManagedUpstreamClusterVersionName}, &cv); err != nil {
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: r.ManagedUpstreamClusterVersionName}, &cv); err != nil {
 		return ctrl.Result{}, fmt.Errorf("could not get cluster version: %w", err)
 	}
 
