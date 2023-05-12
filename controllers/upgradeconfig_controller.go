@@ -195,6 +195,7 @@ func filterControlledJobs(uc managedupgradev1beta1.UpgradeConfig, jobs []managed
 
 func calcNextRun(earliest time.Time, sched cron.Schedule, schedISOWeek string) (time.Time, error) {
 	nextRun := sched.Next(earliest)
+	// if the next run is more than 1000 runs away, we assume that the cron schedule is invalid as a safe guard
 	for i := 0; i < 1000; i++ {
 		isoWeekOK, err := checkIsoWeek(nextRun, schedISOWeek)
 		if err != nil {
