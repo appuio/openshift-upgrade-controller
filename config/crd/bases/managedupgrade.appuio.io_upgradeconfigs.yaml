@@ -1,0 +1,161 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.4
+  name: upgradeconfigs.managedupgrade.appuio.io
+spec:
+  group: managedupgrade.appuio.io
+  names:
+    kind: UpgradeConfig
+    listKind: UpgradeConfigList
+    plural: upgradeconfigs
+    singular: upgradeconfig
+  scope: Namespaced
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: UpgradeConfig is the Schema for the upgradeconfigs API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: UpgradeConfigSpec defines the desired state of UpgradeConfig
+            properties:
+              jobTemplate:
+                description: JobTemplate defines the template for the upgrade job
+                properties:
+                  spec:
+                    description: UpgradeConfigJobTemplateSpec defines the desired
+                      state of UpgradeJob
+                    properties:
+                      config:
+                        description: UpgradeJobConfig defines the configuration for
+                          the upgrade job
+                        properties:
+                          postUpgradeHealthChecks:
+                            description: PostUpgradeHealthChecks defines the health
+                              checks to be performed after the upgrade
+                            properties:
+                              skipDegradedOperatorsCheck:
+                                description: SkipDegradedOperatorsCheck defines whether
+                                  to check the ClusterVersion object for degraded
+                                  operators when performing the health check
+                                type: boolean
+                              timeout:
+                                default: 1h
+                                description: Timeout defines the timeout after which
+                                  the health check is considered failed
+                                format: duration
+                                type: string
+                            required:
+                            - timeout
+                            type: object
+                          preUpgradeHealthChecks:
+                            description: PreUpgradeHealthChecks defines the health
+                              checks to be performed before the upgrade
+                            properties:
+                              skipDegradedOperatorsCheck:
+                                description: SkipDegradedOperatorsCheck defines whether
+                                  to check the ClusterVersion object for degraded
+                                  operators when performing the health check
+                                type: boolean
+                              timeout:
+                                default: 1h
+                                description: Timeout defines the timeout after which
+                                  the health check is considered failed
+                                format: duration
+                                type: string
+                            required:
+                            - timeout
+                            type: object
+                          upgradeTimeout:
+                            default: 12h
+                            description: UpgradeTimeout defines the timeout after
+                              which the upgrade is considered failed
+                            format: duration
+                            type: string
+                        required:
+                        - postUpgradeHealthChecks
+                        - preUpgradeHealthChecks
+                        - upgradeTimeout
+                        type: object
+                    required:
+                    - config
+                    type: object
+                required:
+                - spec
+                type: object
+              maxSchedulingDelay:
+                default: 1h
+                description: MaxSchedulingDelay defines the maximum time after which
+                  the upgrade job should be scheduled. If the upgrade job is not scheduled
+                  before this time, it will not be scheduled.
+                format: duration
+                type: string
+              maxUpgradeStartDelay:
+                default: 1h
+                description: MaxUpgradeStartDelay defines the maximum time after which
+                  the upgrade job should be started. If the upgrade job is not started
+                  before this time, it is considered failed.
+                format: duration
+                type: string
+              pinVersionWindow:
+                description: PinVersionWindow defines the time window before the maintenance
+                  window in which the upgrade version is pinned. `UpgradeJobs` are
+                  created at `schedule - pinVersionWindow`.
+                type: string
+              schedule:
+                description: Schedule defines the schedule for the upgrade
+                properties:
+                  cron:
+                    description: Cron defines the cron schedule for the upgrade as
+                      per https://pkg.go.dev/github.com/robfig/cron/v3#hdr-CRON_Expression_Format
+                    type: string
+                  isoWeek:
+                    description: IsoWeek defines the week of the year according to
+                      ISO 8601 week number to schedule the upgrade. Currently supported
+                      values are `@odd` and `@even`.
+                    pattern: ^(@odd|@even|\d{1,2})$
+                    type: string
+                  location:
+                    default: Local
+                    description: Location defines the location to use for the cron
+                      schedule. Defaults to the local time zone.
+                    type: string
+                  suspend:
+                    description: Suspend defines whether the upgrade should be suspended.
+                      Defaults to false.
+                    type: boolean
+                required:
+                - cron
+                - location
+                type: object
+            required:
+            - jobTemplate
+            - maxSchedulingDelay
+            - maxUpgradeStartDelay
+            - schedule
+            type: object
+          status:
+            description: UpgradeConfigStatus defines the observed state of UpgradeConfig
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

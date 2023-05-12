@@ -1,0 +1,27 @@
+# permissions for end users to view upgradejobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: upgradejob-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: openshift-upgrade-controller
+    app.kubernetes.io/part-of: openshift-upgrade-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: upgradejob-viewer-role
+rules:
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - upgradejobs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - upgradejobs/status
+  verbs:
+  - get

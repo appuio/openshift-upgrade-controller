@@ -11,6 +11,9 @@ You’ll need a Kubernetes cluster to run against. You can use [KIND](https://si
 1. Install Instances of Custom Resources:
 
 ```sh
+# To simulate an OpenShift cluster
+kubectl apply -f https://raw.githubusercontent.com/openshift/api/master/config/v1/0000_00_cluster-version-operator_01_clusterversion.crd.yaml
+
 kubectl apply -f config/samples/
 ```
 

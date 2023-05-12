@@ -43,6 +43,11 @@ spec:
       containers:
       - args:
         - --leader-elect
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         image: ghcr.io/appuio/openshift-upgrade-controller:latest
         name: manager
         securityContext:

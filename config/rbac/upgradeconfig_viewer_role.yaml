@@ -1,0 +1,27 @@
+# permissions for end users to view upgradeconfigs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: upgradeconfig-viewer-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: openshift-upgrade-controller
+    app.kubernetes.io/part-of: openshift-upgrade-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: upgradeconfig-viewer-role
+rules:
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - upgradeconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - upgradeconfigs/status
+  verbs:
+  - get

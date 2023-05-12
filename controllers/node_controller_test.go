@@ -10,17 +10,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestReconcile(t *testing.T) {
+func Test_NodeReconciler_Reconcile(t *testing.T) {
 	ctx := context.Background()
 
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	require.NoError(t, clientgoscheme.AddToScheme(scheme))
 
 	client := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -47,7 +46,7 @@ func TestReconcile(t *testing.T) {
 	_, err = subject.Reconcile(ctx, requestFor("node1"))
 	require.NoError(t, err)
 	require.Equal(t, 0,
-		testutil.CollectAndCount(nodeDraining, "ocp_drain_monitor_node_draining"),
+		testutil.CollectAndCount(nodeDraining, "openshift_upgrade_controller_node_draining"),
 		"metric should be removed if not able to calculate it")
 }
 
