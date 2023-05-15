@@ -6,8 +6,8 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
+	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -16,7 +16,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 )
@@ -72,7 +71,17 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		},
 	}
 
-	client := controllerClient(t, ucv, upgradeJob)
+	masterPool := &machineconfigurationv1.MachineConfigPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "master",
+		},
+		Status: machineconfigurationv1.MachineConfigPoolStatus{
+			MachineCount:        3,
+			UpdatedMachineCount: 3,
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob, masterPool)
 
 	subject := &UpgradeJobReconciler{
 		Client: client,
@@ -145,8 +154,13 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		require.Equal(t, upgradeJob.Spec.DesiredVersion.Image, ucv.Spec.DesiredUpdate.Image)
 	})
 
+	step(t, "mark master pool as updating", func(t *testing.T) {
+		masterPool.Status.UpdatedMachineCount = masterPool.Status.MachineCount - 1
+		require.NoError(t, client.Status().Update(ctx, masterPool))
+	})
+
 	step(t, "wait for upgrade to complete", func(t *testing.T) {
-		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
+		_, err := subject.Reconcile(ctx, mappedObjectRequest())
 		require.NoError(t, err)
 		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionFalse(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "should set condition to false if still in progress")
@@ -165,7 +179,15 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		}
 		require.NoError(t, client.Status().Update(ctx, ucv))
 
-		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
+		_, err = subject.Reconcile(ctx, mappedObjectRequest())
+		require.NoError(t, err)
+		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.True(t, apimeta.IsStatusConditionFalse(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "machine pool still upgrading")
+
+		masterPool.Status.UpdatedMachineCount = masterPool.Status.MachineCount
+		require.NoError(t, client.Status().Update(ctx, masterPool))
+
+		_, err = subject.Reconcile(ctx, mappedObjectRequest())
 		require.NoError(t, err)
 		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "should set condition to true if upgrade completed")
@@ -213,6 +235,8 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
 		require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+		_, err = subject.Reconcile(ctx, mappedObjectRequest())
+		require.NoError(t, err, "should ignore requests if cluster version is not locked")
 	})
 }
 
@@ -505,62 +529,6 @@ func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
 	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
 }
 
-func Test_MapClusterVersionEventToUpgradeJob(t *testing.T) {
-	testCases := []struct {
-		name             string
-		eventObj         client.Object
-		expectedRequests []reconcile.Request
-	}{
-		{
-			name: "should map locked cluster version to upgrade job",
-			eventObj: &configv1.ClusterVersion{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						ClusterVersionLockAnnotation: "openshift-upgrade-controller/upgrade-21234-4-5-34",
-					},
-				},
-			},
-			expectedRequests: []reconcile.Request{{
-				NamespacedName: types.NamespacedName{
-					Name:      "upgrade-21234-4-5-34",
-					Namespace: "openshift-upgrade-controller",
-				},
-			}},
-		}, {
-			name: "wrong object",
-			eventObj: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						ClusterVersionLockAnnotation: "openshift-upgrade-controller",
-					},
-				},
-			},
-			expectedRequests: []reconcile.Request{},
-		}, {
-			name:             "nil annotations",
-			eventObj:         &configv1.ClusterVersion{},
-			expectedRequests: []reconcile.Request{},
-		}, {
-			name: "invalid annotation",
-			eventObj: &configv1.ClusterVersion{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
-						ClusterVersionLockAnnotation: "asd",
-					},
-				},
-			},
-			expectedRequests: []reconcile.Request{},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			requests := MapClusterVersionEventToUpgradeJob(tc.eventObj)
-			require.Equal(t, tc.expectedRequests, requests)
-		})
-	}
-}
-
 type mockClock struct {
 	now time.Time
 }
@@ -582,6 +550,15 @@ func requestForObject(o client.Object) ctrl.Request {
 	}
 }
 
+func mappedObjectRequest() ctrl.Request {
+	return ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      EventSelectJobFromClusterVersion,
+			Namespace: EventSelectJobFromClusterVersion,
+		},
+	}
+}
+
 func step(t *testing.T, msg string, test func(t *testing.T)) {
 	t.Logf("STEP: %s", msg)
 	test(t)
@@ -593,6 +570,7 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 	scheme := runtime.NewScheme()
 	require.NoError(t, clientgoscheme.AddToScheme(scheme))
 	require.NoError(t, configv1.AddToScheme(scheme))
+	require.NoError(t, machineconfigurationv1.AddToScheme(scheme))
 	require.NoError(t, managedupgradev1beta1.AddToScheme(scheme))
 
 	return fake.NewClientBuilder().

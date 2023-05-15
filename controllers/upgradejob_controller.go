@@ -7,6 +7,7 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
+	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,6 +24,14 @@ import (
 	"github.com/appuio/openshift-upgrade-controller/pkg/healthcheck"
 )
 
+// EventSelectJobFromClusterVersion is a marker to select the upgrade job from the locked cluster version.
+// Injected in NewControllerManagedBy().Watches(...,markSelectFromClusterVersion()).
+// Used to redirect any reconcile request during a running upgrade to the upgrade job.
+// Feels a bit hacky but it is IMO better than building a custom event handler where we don't have access to the context.
+// Also I think it's better than having random RequeueAfter values in the reconcile loop.
+// No valid kubernetes name so it can't conflict with a real job.
+const EventSelectJobFromClusterVersion = "__SELECT_JOB_FROM_CLUSTER_VERSION__"
+
 // UpgradeJobReconciler reconciles a UpgradeJob object
 type UpgradeJobReconciler struct {
 	client.Client
@@ -36,6 +45,7 @@ type UpgradeJobReconciler struct {
 var ClusterVersionLockAnnotation = managedupgradev1beta1.GroupVersion.Group + "/upgrade-job"
 
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch
 
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs/status,verbs=get;update;patch
@@ -46,8 +56,17 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.Reconcile")
 	l.Info("Reconciling UpgradeJob")
 
+	ok, namespacedName, err := r.jobFromRequest(ctx, req)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to get job from request: %w", err)
+	}
+	// not a job update or no locked cluster version
+	if !ok {
+		return ctrl.Result{}, nil
+	}
+
 	var uj managedupgradev1beta1.UpgradeJob
-	if err := r.Get(ctx, req.NamespacedName, &uj); err != nil {
+	if err := r.Get(ctx, namespacedName, &uj); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !uj.DeletionTimestamp.IsZero() {
@@ -91,6 +110,8 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (ctrl.Result, error) {
+	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.reconcileStartedJob")
+
 	startedCond := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted)
 	if r.Clock.Now().After(startedCond.LastTransitionTime.Add(uj.Spec.UpgradeTimeout.Duration)) {
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
@@ -157,16 +178,28 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, r.Status().Update(ctx, uj)
 	}
 	if upgradedCon.Status != metav1.ConditionTrue {
-		if clusterversion.IsVersionUpgradeCompleted(version) {
-			r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
-				Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
-				Status:  metav1.ConditionTrue,
-				Reason:  managedupgradev1beta1.UpgradeJobReasonCompleted,
-				Message: "Upgrade completed",
-			})
-			return ctrl.Result{}, r.Status().Update(ctx, uj)
+		if !clusterversion.IsVersionUpgradeCompleted(version) {
+			l.Info("Upgrade still in progress")
+			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, nil
+
+		mcpl := machineconfigurationv1.MachineConfigPoolList{}
+		if err := r.List(ctx, &mcpl); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to list machine config pools: %w", err)
+		}
+		poolsUpdating := healthcheck.MachineConfigPoolsUpdating(mcpl)
+		if len(poolsUpdating) > 0 {
+			l.Info("Machine config pools still updating", "pools", poolsUpdating)
+			return ctrl.Result{}, nil
+		}
+
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+			Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
+			Status:  metav1.ConditionTrue,
+			Reason:  managedupgradev1beta1.UpgradeJobReasonCompleted,
+			Message: "Upgrade completed",
+		})
+		return ctrl.Result{}, r.Status().Update(ctx, uj)
 	}
 
 	ok, err = r.runHealthCheck(ctx, uj, version,
@@ -198,8 +231,54 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 func (r *UpgradeJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&managedupgradev1beta1.UpgradeJob{}).
-		Watches(&source.Kind{Type: &configv1.ClusterVersion{}}, handler.EnqueueRequestsFromMapFunc(MapClusterVersionEventToUpgradeJob)).
+		Watches(&source.Kind{Type: &configv1.ClusterVersion{}}, markSelectFromClusterVersion()).
+		Watches(&source.Kind{Type: &machineconfigurationv1.MachineConfigPool{}}, markSelectFromClusterVersion()).
 		Complete(r)
+}
+
+// markSelectFromClusterVersion returns a handler that enqueues a reconcile request marked with the eventSelectJobFromClusterVersion marker.
+func markSelectFromClusterVersion() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(_ client.Object) []reconcile.Request {
+		return []reconcile.Request{{
+			NamespacedName: types.NamespacedName{
+				Name:      EventSelectJobFromClusterVersion,
+				Namespace: EventSelectJobFromClusterVersion,
+			},
+		}}
+	})
+}
+
+// jobFromRequest returns the job from the request.
+// If the request contains the eventSelectJobFromClusterVersion marker, it returns the job for the locked cluster version.
+func (r *UpgradeJobReconciler) jobFromRequest(ctx context.Context, req ctrl.Request) (ok bool, namespacedName types.NamespacedName, err error) {
+	if req.Name == EventSelectJobFromClusterVersion && req.Namespace == EventSelectJobFromClusterVersion {
+		var version configv1.ClusterVersion
+		if err := r.Get(ctx, types.NamespacedName{Name: r.ManagedUpstreamClusterVersionName}, &version); err != nil {
+			return false, types.NamespacedName{}, fmt.Errorf("failed to get cluster version: %w", err)
+		}
+		ok, namespacedName = upgradeJobNameFromLockedClusterVersion(version)
+		return ok, namespacedName, nil
+	}
+	return true, req.NamespacedName, nil
+}
+
+// upgradeJobNameFromLockedClusterVersion returns the upgrade job name from the locked cluster version.
+// If the cluster version is not locked, it returns false.
+func upgradeJobNameFromLockedClusterVersion(cv configv1.ClusterVersion) (ok bool, nn types.NamespacedName) {
+	job := cv.GetAnnotations()[ClusterVersionLockAnnotation]
+	if job == "" {
+		return false, types.NamespacedName{}
+	}
+
+	jobParts := strings.Split(job, "/")
+	if len(jobParts) != 2 {
+		return false, types.NamespacedName{}
+	}
+
+	return true, types.NamespacedName{
+		Namespace: jobParts[0],
+		Name:      jobParts[1],
+	}
 }
 
 // setStatusCondition is a wrapper for apimeta.SetStatusCondition that sets the LastTransitionTime to r.Clock.Now().
@@ -291,32 +370,4 @@ func (r *UpgradeJobReconciler) tryLockClusterVersion(ctx context.Context, versio
 	}
 
 	return nil
-}
-
-// MapClusterVersionEventToUpgradeJob maps a cluster version event to the upgrade job that is locking the cluster version
-func MapClusterVersionEventToUpgradeJob(o client.Object) []reconcile.Request {
-	if _, ok := o.(*configv1.ClusterVersion); !ok {
-		return []reconcile.Request{}
-	}
-
-	job := o.GetAnnotations()[ClusterVersionLockAnnotation]
-	if job == "" {
-		return []reconcile.Request{}
-	}
-
-	jobParts := strings.Split(job, "/")
-	if len(jobParts) != 2 {
-		return []reconcile.Request{}
-	}
-	namespace := jobParts[0]
-	name := jobParts[1]
-
-	return []reconcile.Request{
-		{
-			NamespacedName: types.NamespacedName{
-				Namespace: namespace,
-				Name:      name,
-			},
-		},
-	}
 }
