@@ -9,6 +9,7 @@ metadata:
     app.kubernetes.io/created-by: openshift-upgrade-controller
     app.kubernetes.io/part-of: openshift-upgrade-controller
     app.kubernetes.io/managed-by: kustomize
+    rbac.authorization.k8s.io/aggregate-to-cluster-reader: 'true'
   name: clusterversion-viewer-role
 rules:
 - apiGroups:
