@@ -16,7 +16,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
@@ -56,11 +55,6 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	// Schedule is suspended, do nothing
-	if uc.Spec.Schedule.Suspend {
-		return ctrl.Result{}, nil
-	}
-
 	location := time.Local
 	if uc.Spec.Schedule.Location != "" {
 		l, err := time.LoadLocation(uc.Spec.Schedule.Location)
@@ -77,16 +71,26 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	latestJob := latestScheduledJob(jobs)
 	now := r.Clock.Now().In(location)
 	earliestTimestamp := uc.ObjectMeta.CreationTimestamp.Time
+	if uc.Status.LastScheduledUpgrade != nil {
+		earliestTimestamp = uc.Status.LastScheduledUpgrade.Time
+	}
 
 	if latestJob != nil {
+		// status might have failed to update, try again
+		if uc.Status.LastScheduledUpgrade == nil || latestJob.Spec.StartAfter.After(uc.Status.LastScheduledUpgrade.Time) {
+			return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, latestJob.Spec.StartAfter.Time)
+		}
+
 		// if there is a future job scheduled, do nothing
 		if latestJob.Spec.StartAfter.After(now) {
+			l.Info("future job already scheduled", "job", latestJob.Name, "startAfter", latestJob.Spec.StartAfter.Time)
 			return ctrl.Result{}, nil
 		}
 		// if the latest job is not completed, do nothing
 		isCompleted := apimeta.IsStatusConditionTrue(latestJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded) ||
 			apimeta.IsStatusConditionTrue(latestJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
 		if !isCompleted {
+			l.Info("latest job not completed", "job", latestJob.Name)
 			return ctrl.Result{}, nil
 		}
 
@@ -107,10 +111,12 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// check if we are in a scheduling window
 	// if we are not yet in the scheduling window, requeue until we are
 	if now.Before(nextCreateJobWindow) {
+		l.Info("not yet in scheduling window", "window", nextCreateJobWindow)
 		return ctrl.Result{RequeueAfter: nextCreateJobWindow.Sub(now)}, nil
 	}
 	// if we are past the scheduling window, do nothing
 	if now.After(nextCreateJobWindow.Add(uc.Spec.MaxSchedulingDelay.Duration)) {
+		l.Info("scheduling window passed", "window", nextCreateJobWindow)
 		return ctrl.Result{}, nil
 	}
 
@@ -122,13 +128,28 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	latestUpdate := clusterversion.LatestAvailableUpdate(cv)
 	if latestUpdate == nil {
 		l.Info("no updates available")
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
 	}
 
-	return r.createJob(uc, *latestUpdate, nextRun, ctx)
+	// Schedule is suspended, do nothing
+	if uc.Spec.Schedule.Suspend {
+		l.Info("would schedule job, but schedule is suspended")
+		return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
+	}
+
+	if err := r.createJob(uc, *latestUpdate, nextRun, ctx); err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not create job: %w", err)
+	}
+
+	return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
 }
 
-func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConfig, latestUpdate configv1.Release, nextRun time.Time, ctx context.Context) (reconcile.Result, error) {
+func (r *UpgradeConfigReconciler) setLastScheduledUpgrade(ctx context.Context, uc *managedupgradev1beta1.UpgradeConfig, t time.Time) error {
+	uc.Status.LastScheduledUpgrade = &metav1.Time{Time: t}
+	return r.Status().Update(ctx, uc)
+}
+
+func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConfig, latestUpdate configv1.Release, nextRun time.Time, ctx context.Context) error {
 	newJob := managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      uc.Name + "-" + strings.ReplaceAll(latestUpdate.Version, ".", "-") + "-" + strconv.FormatInt(nextRun.Unix(), 10),
@@ -148,14 +169,14 @@ func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConf
 	}
 
 	if err := ctrl.SetControllerReference(&uc, &newJob, r.Scheme); err != nil {
-		return ctrl.Result{}, fmt.Errorf("could not set controller reference: %w", err)
+		return fmt.Errorf("could not set controller reference: %w", err)
 	}
 
 	if err := r.Create(ctx, &newJob); err != nil {
-		return ctrl.Result{}, fmt.Errorf("could not create job: %w", err)
+		return fmt.Errorf("could not create job: %w", err)
 	}
 
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
