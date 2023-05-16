@@ -58,6 +58,11 @@ type UpgradeConfigSchedule struct {
 
 // UpgradeConfigStatus defines the observed state of UpgradeConfig
 type UpgradeConfigStatus struct {
+	// LastScheduledUpgrade is the time at which the cluster version was last checked for updates.
+	// Matches the startAfter time of the upgrade job that was created, or would have been created if an update was available.
+	// Also is increased when a job would have been created, but was not created due to the config being suspended.
+	// +optional
+	LastScheduledUpgrade *metav1.Time `json:"lastScheduledUpgrade,omitempty"`
 }
 
 //+kubebuilder:object:root=true

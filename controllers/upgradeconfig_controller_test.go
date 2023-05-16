@@ -9,6 +9,7 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -28,18 +29,6 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		},
 		Spec: configv1.ClusterVersionSpec{
 			ClusterID: "9b588658-9671-429c-a762-34106da5795f",
-		},
-		Status: configv1.ClusterVersionStatus{
-			AvailableUpdates: []configv1.Release{
-				{
-					Version: "4.5.13",
-					Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
-				},
-				{
-					Version: "4.5.12",
-					Image:   "quay.io/openshift-release-dev/ocp-release@sha256:4e5ace08e0807f18300d33e51251bb3dea3f9ba3e2dac0f0b5f8ba13581c6193",
-				},
-			},
 		},
 	}
 
@@ -78,6 +67,42 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		// Tuesday in a week + 14 hours (08:00->22:00) - 1 hour (version pin window)
 		require.Equal(t, (8*24*time.Hour)+(14*time.Hour)-upgradeConfig.Spec.PinVersionWindow.Duration, res.RequeueAfter)
 		clock.Advance(res.RequeueAfter)
+	})
+
+	step(t, "no upgrade available", func(t *testing.T) {
+		_, err := subject.Reconcile(ctx, requestForObject(upgradeConfig))
+		require.NoError(t, err)
+
+		jobs := listJobs(t, client, upgradeConfig.Namespace)
+		require.Len(t, jobs, 0, "no upgrade available, no job should be scheduled")
+		var uuc managedupgradev1beta1.UpgradeConfig
+		expectedStartAfter := clock.Now().Add(upgradeConfig.Spec.PinVersionWindow.Duration)
+		require.NoError(t, client.Get(ctx, types.NamespacedName{Name: upgradeConfig.Name, Namespace: upgradeConfig.Namespace}, &uuc))
+		require.Equal(t, expectedStartAfter.In(time.UTC), uuc.Status.LastScheduledUpgrade.In(time.UTC), "last scheduled time should be updated")
+
+		clock.Advance(24 * time.Hour)
+	})
+
+	step(t, "not in job creation window", func(t *testing.T) {
+		res, err := subject.Reconcile(ctx, requestForObject(upgradeConfig))
+		require.NoError(t, err)
+		// In two weeks minus 1 day already advanced in previous step
+		require.Equal(t, (14*24*time.Hour)-(24*time.Hour), res.RequeueAfter)
+		clock.Advance(res.RequeueAfter)
+	})
+
+	step(t, "make update available", func(t *testing.T) {
+		ucv.Status.AvailableUpdates = []configv1.Release{
+			{
+				Version: "4.5.13",
+				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
+			},
+			{
+				Version: "4.5.12",
+				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:4e5ace08e0807f18300d33e51251bb3dea3f9ba3e2dac0f0b5f8ba13581c6193",
+			},
+		}
+		require.NoError(t, client.Update(ctx, ucv))
 	})
 
 	step(t, "create upgrade job", func(t *testing.T) {
