@@ -13,6 +13,7 @@ You’ll need a Kubernetes cluster to run against. You can use [KIND](https://si
 ```sh
 # To simulate an OpenShift cluster
 kubectl apply -f https://raw.githubusercontent.com/openshift/api/master/config/v1/0000_00_cluster-version-operator_01_clusterversion.crd.yaml
+kubectl apply -f https://raw.githubusercontent.com/openshift/machine-config-operator/master/install/0000_80_machine-config-operator_01_machineconfigpool.crd.yaml
 
 kubectl apply -f config/samples/
 ```

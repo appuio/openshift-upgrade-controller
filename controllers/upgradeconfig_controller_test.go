@@ -102,7 +102,7 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:4e5ace08e0807f18300d33e51251bb3dea3f9ba3e2dac0f0b5f8ba13581c6193",
 			},
 		}
-		require.NoError(t, client.Update(ctx, ucv))
+		require.NoError(t, client.Status().Update(ctx, ucv))
 	})
 
 	step(t, "create upgrade job", func(t *testing.T) {

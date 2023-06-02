@@ -160,7 +160,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	})
 
 	step(t, "wait for upgrade to complete", func(t *testing.T) {
-		_, err := subject.Reconcile(ctx, mappedObjectRequest())
+		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
 		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionFalse(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "should set condition to false if still in progress")
@@ -179,7 +179,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		}
 		require.NoError(t, client.Status().Update(ctx, ucv))
 
-		_, err = subject.Reconcile(ctx, mappedObjectRequest())
+		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
 		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionFalse(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "machine pool still upgrading")
@@ -187,7 +187,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		masterPool.Status.UpdatedMachineCount = masterPool.Status.MachineCount
 		require.NoError(t, client.Status().Update(ctx, masterPool))
 
-		_, err = subject.Reconcile(ctx, mappedObjectRequest())
+		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
 		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "should set condition to true if upgrade completed")
@@ -235,7 +235,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
 		require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
-		_, err = subject.Reconcile(ctx, mappedObjectRequest())
+		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err, "should ignore requests if cluster version is not locked")
 	})
 }
@@ -529,6 +529,28 @@ func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
 	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
 }
 
+func Test_JobFromClusterVersionHandler(t *testing.T) {
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+	}
+
+	client := controllerClient(t, ucv)
+	subject := JobFromClusterVersionMapper(client, "version")
+
+	require.Len(t, subject(context.Background(), nil), 0, "should not return a reconcile request if clusterversion is not locked")
+
+	ucv.Annotations = map[string]string{
+		ClusterVersionLockAnnotation: "ns/upgrade-1234-4-5-13",
+	}
+	require.NoError(t, client.Update(context.Background(), ucv))
+
+	reqs := subject(context.Background(), nil)
+	require.Len(t, reqs, 1, "should return a reconcile request if clusterversion is locked")
+	require.Equal(t, types.NamespacedName{Namespace: "ns", Name: "upgrade-1234-4-5-13"}, reqs[0].NamespacedName)
+}
+
 type mockClock struct {
 	now time.Time
 }
@@ -550,15 +572,6 @@ func requestForObject(o client.Object) ctrl.Request {
 	}
 }
 
-func mappedObjectRequest() ctrl.Request {
-	return ctrl.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      EventSelectJobFromClusterVersion,
-			Namespace: EventSelectJobFromClusterVersion,
-		},
-	}
-}
-
 func step(t *testing.T, msg string, test func(t *testing.T)) {
 	t.Logf("STEP: %s", msg)
 	test(t)
@@ -576,5 +589,11 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 	return fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(initObjs...).
+		WithStatusSubresource(
+			&managedupgradev1beta1.UpgradeConfig{},
+			&managedupgradev1beta1.UpgradeJob{},
+			&configv1.ClusterVersion{},
+			&machineconfigurationv1.MachineConfigPool{},
+		).
 		Build()
 }

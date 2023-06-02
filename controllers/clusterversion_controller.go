@@ -12,7 +12,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
@@ -91,7 +90,7 @@ func (r *ClusterVersionReconciler) Filter(obj client.Object) bool {
 func (r *ClusterVersionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&managedupgradev1beta1.ClusterVersion{}).
-		Watches(&source.Kind{Type: &configv1.ClusterVersion{}}, &handler.EnqueueRequestForObject{}).
+		Watches(&configv1.ClusterVersion{}, &handler.EnqueueRequestForObject{}).
 		WithEventFilter(predicate.NewPredicateFuncs(r.Filter)).
 		Complete(r)
 }
