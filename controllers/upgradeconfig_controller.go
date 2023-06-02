@@ -102,7 +102,11 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	nextRun, err := calcNextRun(earliestTimestamp.In(location), sched, uc.Spec.Schedule.IsoWeek)
+	nextRun := earliestTimestamp.In(location)
+	nextRunAttempts := 0
+findNextRun:
+	nextRunAttempts++
+	nextRun, err = calcNextRun(nextRun, sched, uc.Spec.Schedule.IsoWeek)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("could not find next run: %w", err)
 	}
@@ -114,10 +118,12 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		l.Info("not yet in scheduling window", "window", nextCreateJobWindow)
 		return ctrl.Result{RequeueAfter: nextCreateJobWindow.Sub(now)}, nil
 	}
-	// if we are past the scheduling window, do nothing
+	// find next scheduling window if we're past the current one
 	if now.After(nextCreateJobWindow.Add(uc.Spec.MaxSchedulingDelay.Duration)) {
-		l.Info("scheduling window passed", "window", nextCreateJobWindow)
-		return ctrl.Result{}, nil
+		if nextRunAttempts > 100 {
+			return ctrl.Result{}, fmt.Errorf("could not find next scheduling window after %d attempts. Most likely missed too many schedules", nextRunAttempts)
+		}
+		goto findNextRun
 	}
 
 	var cv configv1.ClusterVersion
