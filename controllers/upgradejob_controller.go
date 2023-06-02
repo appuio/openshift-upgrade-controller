@@ -17,20 +17,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
 	"github.com/appuio/openshift-upgrade-controller/pkg/healthcheck"
 )
-
-// EventSelectJobFromClusterVersion is a marker to select the upgrade job from the locked cluster version.
-// Injected in NewControllerManagedBy().Watches(...,markSelectFromClusterVersion()).
-// Used to redirect any reconcile request during a running upgrade to the upgrade job.
-// Feels a bit hacky but it is IMO better than building a custom event handler where we don't have access to the context.
-// Also I think it's better than having random RequeueAfter values in the reconcile loop.
-// No valid kubernetes name so it can't conflict with a real job.
-const EventSelectJobFromClusterVersion = "__SELECT_JOB_FROM_CLUSTER_VERSION__"
 
 // UpgradeJobReconciler reconciles a UpgradeJob object
 type UpgradeJobReconciler struct {
@@ -56,17 +47,8 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.Reconcile")
 	l.Info("Reconciling UpgradeJob")
 
-	ok, namespacedName, err := r.jobFromRequest(ctx, req)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to get job from request: %w", err)
-	}
-	// not a job update or no locked cluster version
-	if !ok {
-		return ctrl.Result{}, nil
-	}
-
 	var uj managedupgradev1beta1.UpgradeJob
-	if err := r.Get(ctx, namespacedName, &uj); err != nil {
+	if err := r.Get(ctx, req.NamespacedName, &uj); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !uj.DeletionTimestamp.IsZero() {
@@ -229,37 +211,33 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *UpgradeJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	jm := handler.EnqueueRequestsFromMapFunc(JobFromClusterVersionMapper(mgr.GetClient(), r.ManagedUpstreamClusterVersionName))
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&managedupgradev1beta1.UpgradeJob{}).
-		Watches(&source.Kind{Type: &configv1.ClusterVersion{}}, markSelectFromClusterVersion()).
-		Watches(&source.Kind{Type: &machineconfigurationv1.MachineConfigPool{}}, markSelectFromClusterVersion()).
+		Watches(&configv1.ClusterVersion{}, jm).
+		Watches(&machineconfigurationv1.MachineConfigPool{}, jm).
 		Complete(r)
 }
 
-// markSelectFromClusterVersion returns a handler that enqueues a reconcile request marked with the eventSelectJobFromClusterVersion marker.
-func markSelectFromClusterVersion() handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(_ client.Object) []reconcile.Request {
-		return []reconcile.Request{{
-			NamespacedName: types.NamespacedName{
-				Name:      EventSelectJobFromClusterVersion,
-				Namespace: EventSelectJobFromClusterVersion,
-			},
-		}}
-	})
-}
+// JobFromClusterVersionMapper returns the job locking the cluster version or nothing.
+// The given object is ignored.
+func JobFromClusterVersionMapper(c client.Reader, cvName string) handler.MapFunc {
+	return func(ctx context.Context, _ client.Object) []reconcile.Request {
+		l := log.FromContext(ctx).WithName("JobFromClusterVersionHandler")
 
-// jobFromRequest returns the job from the request.
-// If the request contains the eventSelectJobFromClusterVersion marker, it returns the job for the locked cluster version.
-func (r *UpgradeJobReconciler) jobFromRequest(ctx context.Context, req ctrl.Request) (ok bool, namespacedName types.NamespacedName, err error) {
-	if req.Name == EventSelectJobFromClusterVersion && req.Namespace == EventSelectJobFromClusterVersion {
 		var version configv1.ClusterVersion
-		if err := r.Get(ctx, types.NamespacedName{Name: r.ManagedUpstreamClusterVersionName}, &version); err != nil {
-			return false, types.NamespacedName{}, fmt.Errorf("failed to get cluster version: %w", err)
+		if err := c.Get(ctx, types.NamespacedName{Name: cvName}, &version); err != nil {
+			l.Error(err, "failed to get cluster version")
+			return nil
 		}
-		ok, namespacedName = upgradeJobNameFromLockedClusterVersion(version)
-		return ok, namespacedName, nil
+
+		found, namespacedName := upgradeJobNameFromLockedClusterVersion(version)
+		if !found {
+			return nil
+		}
+
+		return []reconcile.Request{{NamespacedName: namespacedName}}
 	}
-	return true, req.NamespacedName, nil
 }
 
 // upgradeJobNameFromLockedClusterVersion returns the upgrade job name from the locked cluster version.
