@@ -88,6 +88,11 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		require.NoError(t, err)
 		// In two weeks minus 1 day already advanced in previous step
 		require.Equal(t, (14*24*time.Hour)-(24*time.Hour), res.RequeueAfter)
+
+		clock.Advance(res.RequeueAfter - 7*time.Hour)
+		res, err = subject.Reconcile(ctx, requestForObject(upgradeConfig))
+		require.NoError(t, err)
+		require.Equal(t, 7*time.Hour, res.RequeueAfter, "intermediate requeue should not reset the requeue time")
 		clock.Advance(res.RequeueAfter)
 	})
 
