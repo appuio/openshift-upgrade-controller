@@ -33,6 +33,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/controllers"
@@ -104,6 +105,12 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+
+	metrics.Registry.MustRegister(&controllers.ClusterUpgradingMetric{
+		Client: mgr.GetClient(),
+
+		ManagedUpstreamClusterVersionName: managedUpstreamClusterVersionName,
+	})
 
 	if err = (&controllers.NodeReconciler{
 		Client: mgr.GetClient(),
