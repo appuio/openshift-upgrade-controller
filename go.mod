@@ -8,7 +8,7 @@ require (
 	github.com/prometheus/client_golang v1.15.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.8.4
-	golang.org/x/mod v0.10.0
+	golang.org/x/mod v0.11.0
 	k8s.io/api v0.27.2
 	k8s.io/apimachinery v0.27.2
 	k8s.io/client-go v0.27.2
