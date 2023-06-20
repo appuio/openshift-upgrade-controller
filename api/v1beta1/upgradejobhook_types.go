@@ -37,6 +37,7 @@ type UpgradeJobHookSpec struct {
 	// +kubebuilder:validation:Enum=Create;Start;Finish;Success;Failure
 	On []string `json:"on,omitempty"`
 	// Run defines if the hook is executed for the `Next` or `All` jobs.
+	// Defaults to `All`.
 	// +kubebuilder:validation:Enum=Next;All
 	Run string `json:"run,omitempty"`
 	// FailurePolicy defines the policy for handling failures.
@@ -50,6 +51,27 @@ type UpgradeJobHookSpec struct {
 	Selector metav1.LabelSelector `json:"selector,omitempty"`
 	// Template is the job template that is executed.
 	Template batchv1.JobTemplateSpec `json:"template,omitempty"`
+}
+
+func (s UpgradeJobHookSpec) GetOn() []string {
+	if s.On == nil {
+		return []string{}
+	}
+	return s.On
+}
+
+func (s UpgradeJobHookSpec) GetRun() string {
+	if s.Run == "" {
+		return RunAll
+	}
+	return s.Run
+}
+
+func (s UpgradeJobHookSpec) GetFailurePolicy() string {
+	if s.FailurePolicy == "" {
+		return FailurePolicyIgnore
+	}
+	return s.FailurePolicy
 }
 
 // UpgradeJobHookStatus defines the observed state of UpgradeJobHook

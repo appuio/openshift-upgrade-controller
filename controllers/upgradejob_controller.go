@@ -8,10 +8,16 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	"go.uber.org/multierr"
+	"golang.org/x/exp/maps"
+	batchv1 "k8s.io/api/batch/v1"
+	v1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/strings/slices"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -35,12 +41,17 @@ type UpgradeJobReconciler struct {
 
 var ClusterVersionLockAnnotation = managedupgradev1beta1.GroupVersion.Group + "/upgrade-job"
 
+const UpgradeJobHookJobFinalizer = "upgradejobhooks.managedupgrade.appuio.io/job"
+
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch
 
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs/finalizers,verbs=update
+
+//+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobhooks,verbs=get;list;watch
+//+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile reconciles a UpgradeJob object and starts the upgrade if necessary.
 func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -52,6 +63,14 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !uj.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
+
+	cont, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventCreate)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !cont {
 		return ctrl.Result{}, nil
 	}
 
@@ -93,6 +112,14 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (ctrl.Result, error) {
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.reconcileStartedJob")
+
+	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !cont {
+		return ctrl.Result{}, nil
+	}
 
 	startedCond := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted)
 	if r.Clock.Now().After(startedCond.LastTransitionTime.Add(uj.Spec.UpgradeTimeout.Duration)) {
@@ -216,6 +243,7 @@ func (r *UpgradeJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&managedupgradev1beta1.UpgradeJob{}).
 		Watches(&configv1.ClusterVersion{}, jm).
 		Watches(&machineconfigurationv1.MachineConfigPool{}, jm).
+		Owns(&batchv1.Job{}).
 		Complete(r)
 }
 
@@ -347,5 +375,137 @@ func (r *UpgradeJobReconciler) tryLockClusterVersion(ctx context.Context, versio
 		}
 	}
 
+	return nil
+}
+
+func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, eventName string) (bool, error) {
+	l := log.FromContext(ctx)
+
+	var allHooks managedupgradev1beta1.UpgradeJobHookList
+	if err := r.List(ctx, &allHooks, client.InNamespace(uj.Namespace)); err != nil {
+		return false, fmt.Errorf("failed to list hooks: %w", err)
+	}
+
+	hooks := make([]managedupgradev1beta1.UpgradeJobHook, 0, len(allHooks.Items))
+	for _, hook := range allHooks.Items {
+		if !slices.Contains(hook.Spec.On, eventName) {
+			continue
+		}
+		sel, err := metav1.LabelSelectorAsSelector(&hook.Spec.Selector)
+		if err != nil {
+			l.Error(err, "failed to parse hook selector")
+			continue
+		}
+		if !sel.Matches(labels.Set(uj.Labels)) {
+			continue
+		}
+		hooks = append(hooks, hook)
+	}
+
+	done := true
+	errors := []error{}
+	for _, hook := range hooks {
+		job, err := r.jobForUpgradeJobAndHook(ctx, uj, hook, eventName)
+		if err != nil {
+			errors = append(errors, err)
+			continue
+		}
+		if !isJobFinished(job) {
+			done = false
+			continue
+		}
+
+		c := jobFailedCondition(job)
+		if c != nil && hook.Spec.GetFailurePolicy() == managedupgradev1beta1.FailurePolicyIgnore {
+			l.Info("hook failed but failure policy is ignore", "hook", hook.Name, "job", job.Name, "reason", c.Reason, "message", c.Message)
+		} else if c != nil {
+			r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+				Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
+				Status:  metav1.ConditionTrue,
+				Reason:  managedupgradev1beta1.UpgradeJobReasonHookFailed,
+				Message: fmt.Sprintf("hook %q failed with %q: %s", hook.Name, c.Reason, c.Message),
+			})
+			return false, r.Status().Update(ctx, uj)
+		}
+	}
+	if err := multierr.Combine(errors...); err != nil {
+		return false, err
+	}
+
+	return done, nil
+}
+
+func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, hook managedupgradev1beta1.UpgradeJobHook, eventName string) (batchv1.Job, error) {
+	var jobs batchv1.JobList
+	if err := r.List(ctx, &jobs, client.InNamespace(uj.Namespace), client.MatchingLabels(jobLabels(uj.Name, hook.Name, eventName))); err != nil {
+		return batchv1.Job{}, err
+	}
+	if len(jobs.Items) == 0 {
+		return r.createHookJob(ctx, hook, uj, eventName)
+	}
+	if len(jobs.Items) > 1 {
+		log.FromContext(ctx).Error(fmt.Errorf("found multiple jobs for upgrade job %q hook %q event %q, ignoring all but first", uj.Name, hook.Name, eventName), "jobs", jobs.Items)
+	}
+	return jobs.Items[0], nil
+}
+
+func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedupgradev1beta1.UpgradeJobHook, uj *managedupgradev1beta1.UpgradeJob, eventName string) (batchv1.Job, error) {
+	ll := make(map[string]string)
+	maps.Copy(ll, hook.Spec.Template.Labels)
+	maps.Copy(ll, jobLabels(uj.Name, hook.Name, eventName))
+
+	job := batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			// TODO(bastjan): always generate valid names
+			Name:        strings.ToLower(fmt.Sprintf("%s-%s-%s-hook", uj.Name, hook.Name, eventName)),
+			Namespace:   uj.Namespace,
+			Annotations: hook.Spec.Template.Annotations,
+			Labels:      ll,
+			Finalizers:  []string{UpgradeJobHookJobFinalizer},
+		},
+		Spec: hook.Spec.Template.Spec,
+	}
+
+	if err := ctrl.SetControllerReference(uj, &job, r.Scheme); err != nil {
+		return batchv1.Job{}, fmt.Errorf("failed to set controller reference: %w", err)
+	}
+
+	if err := r.Create(ctx, &job); err != nil {
+		return batchv1.Job{}, fmt.Errorf("failed to create hook job: %w", err)
+	}
+
+	return job, nil
+}
+
+func jobLabels(jobName, hookName, eventName string) map[string]string {
+	return map[string]string{
+		prefixJobLabel("upgradejobhook"): hookName,
+		prefixJobLabel("upgradejob"):     jobName,
+		prefixJobLabel("event"):          eventName,
+	}
+}
+
+func prefixJobLabel(name string) string {
+	return fmt.Sprintf("%s/%s", managedupgradev1beta1.GroupVersion.Group, name)
+}
+
+// isJobFinished checks whether the given Job has finished execution.
+// It does not discriminate between successful and failed terminations.
+func isJobFinished(j batchv1.Job) bool {
+	for _, c := range j.Status.Conditions {
+		if (c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) && c.Status == v1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// jobFailedCondition returns the JobCondition with type JobFailed if it exists and is true, nil otherwise.
+func jobFailedCondition(j batchv1.Job) *batchv1.JobCondition {
+	for _, c := range j.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == v1.ConditionTrue {
+			return &c
+		}
+	}
 	return nil
 }

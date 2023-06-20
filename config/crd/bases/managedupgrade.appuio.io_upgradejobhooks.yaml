@@ -57,7 +57,7 @@ spec:
                 type: array
               run:
                 description: Run defines if the hook is executed for the `Next` or
-                  `All` jobs.
+                  `All` jobs. Defaults to `All`.
                 enum:
                 - Next
                 - All

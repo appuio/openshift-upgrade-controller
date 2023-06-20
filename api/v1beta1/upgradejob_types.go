@@ -31,6 +31,8 @@ const (
 	UpgradeJobReasonPostHealthCheckFailed = "PostHealthCheckFailed"
 	// UpgradeJobReasonUpgradeWithdrawn is used when the upgrade was retracted by the upstream after the upgrade job was created
 	UpgradeJobReasonUpgradeWithdrawn = "UpgradeWithdrawn"
+	// UpgradeJobReasonHookFailed is used when a hook failed
+	UpgradeJobReasonHookFailed = "HookFailed"
 	// UpgradeJobReasonStarted is used when a step of the upgrade job was started
 	UpgradeJobReasonStarted = "Started"
 	// UpgradeJobReasonSucceeded is used when a step of the upgrade job did succeed

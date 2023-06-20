@@ -8,6 +8,8 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	"github.com/stretchr/testify/require"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -55,6 +57,9 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "upgrade-1234-4-5-13",
 			Namespace: "appuio-openshift-upgrade-controller",
+			Labels: map[string]string{
+				"name": "upgrade-1234-4-5-13",
+			},
 		},
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartBefore: metav1.NewTime(clock.Now().Add(10 * time.Hour)),
@@ -70,6 +75,18 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 			},
 		},
 	}
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notify",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			On: []string{managedupgradev1beta1.EventCreate, managedupgradev1beta1.EventStart},
+		},
+	}
 
 	masterPool := &machineconfigurationv1.MachineConfigPool{
 		ObjectMeta: metav1.ObjectMeta{
@@ -81,16 +98,20 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		},
 	}
 
-	client := controllerClient(t, ucv, upgradeJob, masterPool)
+	c := controllerClient(t, ucv, upgradeJob, upgradeJobHook, masterPool)
 
 	subject := &UpgradeJobReconciler{
-		Client: client,
-		Scheme: client.Scheme(),
+		Client: c,
+		Scheme: c.Scheme(),
 
 		Clock: &clock,
 
 		ManagedUpstreamClusterVersionName: "version",
 	}
+
+	step(t, "`Create` hook", func(t *testing.T) {
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate)
+	})
 
 	step(t, "Scheduled too early", func(t *testing.T) {
 		res, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
@@ -103,14 +124,18 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	step(t, "Start upgrade", func(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted))
+	})
+
+	step(t, "`Start` hook", func(t *testing.T) {
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventStart)
 	})
 
 	step(t, "Lock cluster version", func(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+		require.NoError(t, c.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
 		lock, ok := ucv.Annotations[ClusterVersionLockAnnotation]
 		require.True(t, ok, "lock annotation must be set")
 		require.Equal(t, upgradeJob.Namespace+"/"+upgradeJob.Name, lock, "lock annotation must contain upgrade job reference")
@@ -121,7 +146,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		require.NoError(t, err)
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t,
 			apimeta.IsStatusConditionFalse(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionPreHealthCheckDone),
 			"sets condition to false for time out handling",
@@ -134,11 +159,11 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 				Status: configv1.ConditionFalse,
 			},
 		}
-		require.NoError(t, client.Status().Update(ctx, ucv))
+		require.NoError(t, c.Status().Update(ctx, ucv))
 
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t,
 			apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionPreHealthCheckDone),
 			"sets condition to true when all healthchecks ok",
@@ -148,7 +173,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	step(t, "start upgrade", func(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+		require.NoError(t, c.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
 
 		require.Equal(t, upgradeJob.Spec.DesiredVersion.Version, ucv.Spec.DesiredUpdate.Version, "should set desired version")
 		require.Equal(t, upgradeJob.Spec.DesiredVersion.Image, ucv.Spec.DesiredUpdate.Image)
@@ -156,13 +181,13 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 
 	step(t, "mark master pool as updating", func(t *testing.T) {
 		masterPool.Status.UpdatedMachineCount = masterPool.Status.MachineCount - 1
-		require.NoError(t, client.Status().Update(ctx, masterPool))
+		require.NoError(t, c.Status().Update(ctx, masterPool))
 	})
 
 	step(t, "wait for upgrade to complete", func(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionFalse(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "should set condition to false if still in progress")
 
 		ucv.Status.History = append(ucv.Status.History, configv1.UpdateHistory{
@@ -177,19 +202,19 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 				Status: configv1.ConditionTrue,
 			},
 		}
-		require.NoError(t, client.Status().Update(ctx, ucv))
+		require.NoError(t, c.Status().Update(ctx, ucv))
 
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionFalse(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "machine pool still upgrading")
 
 		masterPool.Status.UpdatedMachineCount = masterPool.Status.MachineCount
-		require.NoError(t, client.Status().Update(ctx, masterPool))
+		require.NoError(t, c.Status().Update(ctx, masterPool))
 
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t, apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted), "should set condition to true if upgrade completed")
 	})
 
@@ -198,7 +223,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		require.NoError(t, err)
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t,
 			apimeta.IsStatusConditionFalse(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionPostHealthCheckDone),
 			"sets condition to false for time out handling",
@@ -211,11 +236,11 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 				Status: configv1.ConditionFalse,
 			},
 		}
-		require.NoError(t, client.Status().Update(ctx, ucv))
+		require.NoError(t, c.Status().Update(ctx, ucv))
 
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t,
 			apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionPostHealthCheckDone),
 			"sets condition to true when all healthchecks ok",
@@ -225,7 +250,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	step(t, "finish and cleanup", func(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		require.True(t,
 			apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded),
 			"job should be marked as succeeded",
@@ -233,7 +258,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+		require.NoError(t, c.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
 		require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err, "should ignore requests if cluster version is not locked")
@@ -583,6 +608,7 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 	scheme := runtime.NewScheme()
 	require.NoError(t, clientgoscheme.AddToScheme(scheme))
 	require.NoError(t, configv1.AddToScheme(scheme))
+	require.NoError(t, batchv1.AddToScheme(scheme))
 	require.NoError(t, machineconfigurationv1.AddToScheme(scheme))
 	require.NoError(t, managedupgradev1beta1.AddToScheme(scheme))
 
@@ -593,7 +619,37 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 			&managedupgradev1beta1.UpgradeConfig{},
 			&managedupgradev1beta1.UpgradeJob{},
 			&configv1.ClusterVersion{},
+			&batchv1.Job{},
 			&machineconfigurationv1.MachineConfigPool{},
 		).
 		Build()
+}
+
+func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event string) {
+	t.Helper()
+	ctx := context.Background()
+
+	var jobs batchv1.JobList
+	var err error
+
+	sel := client.MatchingLabels{
+		managedupgradev1beta1.GroupVersion.Group + "/upgradejobhook": upgradeJobHook.Name,
+		managedupgradev1beta1.GroupVersion.Group + "/upgradejob":     upgradeJob.Name,
+		managedupgradev1beta1.GroupVersion.Group + "/event":          event,
+	}
+
+	for i := 0; i < 3; i++ {
+		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
+		require.NoError(t, err)
+		require.NoError(t, c.List(ctx, &jobs, sel))
+		require.Lenf(t, jobs.Items, 1, "should create a job with %q labels", sel)
+	}
+
+	job := jobs.Items[0]
+	job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
+		Type:   batchv1.JobComplete,
+		Status: corev1.ConditionTrue,
+	})
+
+	require.NoError(t, c.Status().Update(ctx, &job))
 }
