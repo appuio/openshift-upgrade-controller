@@ -31,6 +31,9 @@ type UpgradeConfigSpec struct {
 
 // UpgradeConfigJobTemplate defines the desired state of UpgradeJob
 type UpgradeConfigJobTemplate struct {
+	// Standard object's metadata of the jobs created from this template.
+	Metadata metav1.ObjectMeta `json:"metadata"`
+	// Specification of the desired behavior of the job.
 	Spec UpgradeConfigJobTemplateSpec `json:"spec"`
 }
 

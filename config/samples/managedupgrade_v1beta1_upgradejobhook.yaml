@@ -1,0 +1,40 @@
+apiVersion: managedupgrade.appuio.io/v1beta1
+kind: UpgradeJobHook
+metadata:
+  labels:
+    app.kubernetes.io/name: upgradejobhook
+    app.kubernetes.io/instance: upgradejobhook-sample
+    app.kubernetes.io/part-of: openshift-upgrade-controller
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: openshift-upgrade-controller
+  name: upgradejobhook-sample
+spec:
+  on:
+    - Create
+    - Start
+    - Finish
+    - Success
+    - Failure
+  run: Next # [Next, All]
+  failurePolicy: Ignore # [Abort, Ignore]
+  selector:
+    matchLabels:
+      upgrade-config: cluster-upgrade
+  template:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: notify
+            image: curlimages/curl:8.1.2 # sponsored OSS image
+            args:
+            - -XPOST
+            - -H
+            - Content-Type: application/json
+            - -d
+            - '{"event": $(EVENT_NAME), "version": $(JOB_spec_desiredVersion_image)}'
+            - https://example.com/webhook
+          restartPolicy: Never
+      backoffLimit: 3
+      ttlSecondsAfterFinished: 43200 # 12h
+      activeDeadlineSeconds: 300 # 5m

@@ -83,6 +83,32 @@ rules:
 - apiGroups:
   - managedupgrade.appuio.io
   resources:
+  - upgradejobhooks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - upgradejobhooks/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - upgradejobhooks/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
   - upgradejobs
   verbs:
   - create
