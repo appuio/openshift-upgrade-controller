@@ -158,8 +158,10 @@ func (r *UpgradeConfigReconciler) setLastScheduledUpgrade(ctx context.Context, u
 func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConfig, latestUpdate configv1.Release, nextRun time.Time, ctx context.Context) error {
 	newJob := managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      uc.Name + "-" + strings.ReplaceAll(latestUpdate.Version, ".", "-") + "-" + strconv.FormatInt(nextRun.Unix(), 10),
-			Namespace: uc.Namespace,
+			Name:        uc.Name + "-" + strings.ReplaceAll(latestUpdate.Version, ".", "-") + "-" + strconv.FormatInt(nextRun.Unix(), 10),
+			Namespace:   uc.Namespace,
+			Annotations: uc.Spec.JobTemplate.Metadata.GetAnnotations(),
+			Labels:      uc.Spec.JobTemplate.Metadata.GetLabels(),
 		},
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartAfter:  metav1.NewTime(nextRun),

@@ -47,6 +47,11 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 			PinVersionWindow:     metav1.Duration{Duration: time.Hour},
 			MaxSchedulingDelay:   metav1.Duration{Duration: time.Minute},
 			MaxUpgradeStartDelay: metav1.Duration{Duration: time.Hour},
+			JobTemplate: managedupgradev1beta1.UpgradeConfigJobTemplate{
+				Metadata: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "openshift-upgrade-controller"},
+				},
+			},
 		},
 	}
 
@@ -124,6 +129,8 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		requireTimeEqual(t, expectedStartAfter, job.Spec.StartAfter.Time)
 		requireTimeEqual(t, expectedStartAfter.Add(upgradeConfig.Spec.MaxUpgradeStartDelay.Duration), job.Spec.StartBefore.Time)
 		require.Equal(t, upgradeConfig.Spec.JobTemplate.Spec.Config, job.Spec.UpgradeJobConfig)
+		require.Equal(t, upgradeConfig.Spec.JobTemplate.Metadata.Annotations, job.Annotations)
+		require.Equal(t, upgradeConfig.Spec.JobTemplate.Metadata.Labels, job.Labels)
 		require.Equal(t, configv1.Update{
 			Version: ucv.Status.AvailableUpdates[0].Version,
 			Image:   ucv.Status.AvailableUpdates[0].Image,
