@@ -387,7 +387,7 @@ func (in *UpgradeJobHookSpec) DeepCopyInto(out *UpgradeJobHookSpec) {
 	*out = *in
 	if in.On != nil {
 		in, out := &in.On, &out.On
-		*out = make([]string, len(*in))
+		*out = make([]UpgradeEvent, len(*in))
 		copy(*out, *in)
 	}
 	in.Selector.DeepCopyInto(&out.Selector)

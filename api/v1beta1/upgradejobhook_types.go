@@ -1,24 +1,35 @@
 package v1beta1
 
 import (
+	"golang.org/x/exp/slices"
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// UpgradeEvent is the type for upgrade events.
+type UpgradeEvent string
+
+func (e UpgradeEvent) InfluencesOutcome() bool {
+	return slices.Contains(eventsInfluencingOutcome, e)
+}
 
 const (
 	// EventCreate is the event type for when a job is created.
 	// The version is pinned at this point and the job is waiting for startAfter.
 	// This can be used to communicate the pending upgrade to other systems.
 	// See `pinVersionWindow` in `UpgradeConfig`.
-	EventCreate = "Create"
+	EventCreate UpgradeEvent = "Create"
 	// EventStart is the event type for when a job is started.
-	EventStart = "Start"
+	EventStart UpgradeEvent = "Start"
+	// UpgradeCompleted is the event type for when the upgrade is completed and health checks have passed.
+	EventUpgradeComplete UpgradeEvent = "UpgradeComplete"
+
 	// EventFinish is the event type for when a job is finished regardless of outcome.
-	EventFinish = "Finish"
+	EventFinish UpgradeEvent = "Finish"
 	// EventSuccess is the event type for when a job is finished successfully.
-	EventSuccess = "Success"
+	EventSuccess UpgradeEvent = "Success"
 	// EventFailure is the event type for when a job is finished with a failure.
-	EventFailure = "Failure"
+	EventFailure UpgradeEvent = "Failure"
 
 	// FailurePolicyAbort is the failure policy for aborting the upgrade.
 	FailurePolicyAbort = "Abort"
@@ -31,11 +42,21 @@ const (
 	RunAll = "All"
 )
 
+// eventsInfluencingOutcome is the list of events that influence the outcome of the upgrade.
+var eventsInfluencingOutcome = []UpgradeEvent{
+	EventCreate,
+	EventStart,
+	EventUpgradeComplete,
+}
+
 // UpgradeJobHookSpec defines the desired state of UpgradeJobHook
 type UpgradeJobHookSpec struct {
 	// On is the list of events to trigger the hook to be executed.
-	// +kubebuilder:validation:Enum=Create;Start;Finish;Success;Failure
-	On []string `json:"on,omitempty"`
+	// `Create`, `Start`, and `UpgradeComplete` are the events that influence the outcome of the upgrade.
+	// `Finish`, `Success`, and `Failure` do not influence the outcome of the upgrade,
+	// Job completion will not be checked, they are only used for informational purposes.
+	// +kubebuilder:validation:Enum=Create;Start;UpgradeComplete;Finish;Success;Failure
+	On []UpgradeEvent `json:"on,omitempty"`
 	// Run defines if the hook is executed for the `Next` or `All` jobs.
 	// Defaults to `All`.
 	// +kubebuilder:validation:Enum=Next;All
@@ -53,9 +74,9 @@ type UpgradeJobHookSpec struct {
 	Template batchv1.JobTemplateSpec `json:"template,omitempty"`
 }
 
-func (s UpgradeJobHookSpec) GetOn() []string {
+func (s UpgradeJobHookSpec) GetOn() []UpgradeEvent {
 	if s.On == nil {
-		return []string{}
+		return []UpgradeEvent{}
 	}
 	return s.On
 }

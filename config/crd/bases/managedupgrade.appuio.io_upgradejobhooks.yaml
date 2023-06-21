@@ -46,13 +46,19 @@ spec:
                 type: string
               "on":
                 description: On is the list of events to trigger the hook to be executed.
+                  `Create`, `Start`, and `UpgradeComplete` are the events that influence
+                  the outcome of the upgrade. `Finish`, `Success`, and `Failure` do
+                  not influence the outcome of the upgrade, Job completion will not
+                  be checked, they are only used for informational purposes.
                 enum:
                 - Create
                 - Start
+                - UpgradeComplete
                 - Finish
                 - Success
                 - Failure
                 items:
+                  description: UpgradeEvent is the type for upgrade events.
                   type: string
                 type: array
               run:

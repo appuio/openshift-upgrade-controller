@@ -84,7 +84,13 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 			Selector: metav1.LabelSelector{
 				MatchLabels: upgradeJob.Labels,
 			},
-			On: []string{managedupgradev1beta1.EventCreate, managedupgradev1beta1.EventStart},
+			On: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventCreate,
+				managedupgradev1beta1.EventStart,
+				managedupgradev1beta1.EventUpgradeComplete,
+				managedupgradev1beta1.EventFinish,
+				managedupgradev1beta1.EventSuccess,
+			},
 		},
 	}
 
@@ -110,7 +116,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	}
 
 	step(t, "`Create` hook", func(t *testing.T) {
-		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate)
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, false)
 	})
 
 	step(t, "Scheduled too early", func(t *testing.T) {
@@ -129,7 +135,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	})
 
 	step(t, "`Start` hook", func(t *testing.T) {
-		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventStart)
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventStart, false)
 	})
 
 	step(t, "Lock cluster version", func(t *testing.T) {
@@ -247,6 +253,10 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		)
 	})
 
+	step(t, "`UpgradeComplete` hook", func(t *testing.T) {
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventUpgradeComplete, true)
+	})
+
 	step(t, "finish and cleanup", func(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
@@ -263,6 +273,73 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err, "should ignore requests if cluster version is not locked")
 	})
+
+	step(t, "`Success` and `Finish` hooks", func(t *testing.T) {
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventSuccess, true)
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, true)
+	})
+}
+
+func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+			Labels:    map[string]string{"test": "test"},
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(-time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-7 * time.Hour)),
+		},
+	}
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notify",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			FailurePolicy: managedupgradev1beta1.FailurePolicyAbort,
+			On: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventCreate,
+				managedupgradev1beta1.EventFailure,
+				managedupgradev1beta1.EventFinish,
+			},
+		},
+	}
+
+	c := controllerClient(t, upgradeJob, upgradeJobHook,
+		&configv1.ClusterVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "version",
+			}})
+
+	subject := &UpgradeJobReconciler{
+		Client: c,
+		Scheme: c.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, true)
+
+	_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
+	require.NoError(t, err)
+	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	require.True(t,
+		apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed),
+		"hook failure with failure policy Abort should mark job as failed",
+	)
+
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFailure, false)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, false)
 }
 
 func Test_UpgradeJobReconciler_Reconcile_Expired(t *testing.T) {
@@ -625,7 +702,7 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 		Build()
 }
 
-func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event string) {
+func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent, fail bool) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -635,7 +712,7 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 	sel := client.MatchingLabels{
 		managedupgradev1beta1.GroupVersion.Group + "/upgradejobhook": upgradeJobHook.Name,
 		managedupgradev1beta1.GroupVersion.Group + "/upgradejob":     upgradeJob.Name,
-		managedupgradev1beta1.GroupVersion.Group + "/event":          event,
+		managedupgradev1beta1.GroupVersion.Group + "/event":          string(event),
 	}
 
 	for i := 0; i < 3; i++ {
@@ -645,11 +722,15 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 		require.Lenf(t, jobs.Items, 1, "should create a job with %q labels", sel)
 	}
 
+	ct := batchv1.JobComplete
+	if fail {
+		ct = batchv1.JobFailed
+	}
+
 	job := jobs.Items[0]
 	job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
-		Type:   batchv1.JobComplete,
+		Type:   ct,
 		Status: corev1.ConditionTrue,
 	})
-
 	require.NoError(t, c.Status().Update(ctx, &job))
 }
