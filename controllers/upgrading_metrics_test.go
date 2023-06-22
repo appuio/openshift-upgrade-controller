@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	configv1 "github.com/openshift/api/config/v1"
 	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -16,6 +17,7 @@ import (
 
 func Test_ClusterUpgradingMetric(t *testing.T) {
 	expectedMetricNames := []string{
+		"openshift_upgrade_controller_upgradejob_state",
 		"openshift_upgrade_controller_cluster_upgrading",
 		"openshift_upgrade_controller_machine_config_pools_upgrading",
 	}
@@ -48,7 +50,58 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 			UpdatedMachineCount: 3,
 		},
 	}
-	c := controllerClient(t, version, masterPool, workerPool)
+
+	pendingJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pending",
+		},
+	}
+	runningJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "running",
+		},
+		Status: managedupgradev1beta1.UpgradeJobStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:   managedupgradev1beta1.UpgradeJobConditionStarted,
+					Status: metav1.ConditionTrue,
+				},
+			},
+		},
+	}
+	succeededJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "succeeded",
+		},
+		Status: managedupgradev1beta1.UpgradeJobStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:   managedupgradev1beta1.UpgradeJobConditionStarted,
+					Status: metav1.ConditionTrue,
+				}, {
+					Type:   managedupgradev1beta1.UpgradeJobConditionSucceeded,
+					Status: metav1.ConditionTrue,
+				},
+			},
+		},
+	}
+	failedJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "failed",
+		},
+		Status: managedupgradev1beta1.UpgradeJobStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:   managedupgradev1beta1.UpgradeJobConditionStarted,
+					Status: metav1.ConditionTrue,
+				}, {
+					Type:   managedupgradev1beta1.UpgradeJobConditionFailed,
+					Status: metav1.ConditionTrue,
+				},
+			},
+		},
+	}
+	c := controllerClient(t, version, masterPool, workerPool, pendingJob, runningJob, succeededJob, failedJob)
 	subject := &ClusterUpgradingMetric{
 		Client: c,
 
@@ -92,6 +145,12 @@ openshift_upgrade_controller_cluster_upgrading %d
 # TYPE openshift_upgrade_controller_machine_config_pools_upgrading gauge
 openshift_upgrade_controller_machine_config_pools_upgrading{pool="master"} %d
 openshift_upgrade_controller_machine_config_pools_upgrading{pool="worker"} %d
+# HELP openshift_upgrade_controller_upgradejob_state Returns the state of jobs in the cluster. 'pending', 'running', 'succeeded', or 'failed' are possible states.
+# TYPE openshift_upgrade_controller_upgradejob_state gauge
+openshift_upgrade_controller_upgradejob_state{job="failed",state="failed"} 1
+openshift_upgrade_controller_upgradejob_state{job="pending",state="pending"} 1
+openshift_upgrade_controller_upgradejob_state{job="running",state="running"} 1
+openshift_upgrade_controller_upgradejob_state{job="succeeded",state="succeeded"} 1
 `
 	return strings.NewReader(
 		fmt.Sprintf(metrics, b2i(upgrading), b2i(masterUpgrading), b2i(workerUpgrading)),
