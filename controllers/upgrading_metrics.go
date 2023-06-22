@@ -80,7 +80,7 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(
 		clusterUpgradingDesc,
 		prometheus.GaugeValue,
-		boolToFloat64(clusterversion.IsUpgrading(cv) || len(poolsUpdating) > 0),
+		boolToFloat64(!clusterversion.IsVersionUpgradeCompleted(cv) || len(poolsUpdating) > 0),
 	)
 }
 

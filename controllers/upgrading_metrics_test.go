@@ -24,12 +24,9 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "version",
 		},
-		Status: configv1.ClusterVersionStatus{
-			Conditions: []configv1.ClusterOperatorStatusCondition{
-				{
-					Type:   configv1.OperatorProgressing,
-					Status: configv1.ConditionTrue,
-				},
+		Spec: configv1.ClusterVersionSpec{
+			DesiredUpdate: &configv1.Update{
+				Version: "4.11.23",
 			},
 		},
 	}
@@ -63,7 +60,11 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 		"upgrading should be true if cluster version is progressing",
 	)
 
-	version.Status.Conditions[0].Status = configv1.ConditionFalse
+	version.Status.History = append(version.Status.History, configv1.UpdateHistory{
+		State:       configv1.CompletedUpdate,
+		StartedTime: metav1.Now(),
+		Version:     version.Spec.DesiredUpdate.Version,
+	})
 	require.NoError(t, c.Status().Update(context.Background(), version))
 	workerPool.Status.UpdatedMachineCount = workerPool.Status.MachineCount - 1
 	require.NoError(t, c.Status().Update(context.Background(), workerPool))
