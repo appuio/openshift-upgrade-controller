@@ -56,7 +56,10 @@ const UpgradeJobHookJobFinalizer = "upgradejobhooks.managedupgrade.appuio.io/job
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs/finalizers,verbs=update
 
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobhooks,verbs=get;list;watch
+//+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobhooks/status,verbs=get;update;patch
+
 //+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=batch,resources=jobs/finalizers,verbs=update
 
 // Reconcile reconciles a UpgradeJob object and starts the upgrade if necessary.
 func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
