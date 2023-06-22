@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -524,8 +526,7 @@ func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedup
 
 	job := batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			// TODO(bastjan): always generate valid names
-			Name:        strings.ToLower(fmt.Sprintf("%s-%s-%s-hook", uj.Name, hook.Name, event)),
+			Name:        jobName(uj.Name, hook.Name, string(event), "hook"),
 			Namespace:   uj.Namespace,
 			Annotations: tmpl.Annotations,
 			Labels:      ll,
@@ -543,6 +544,16 @@ func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedup
 	}
 
 	return job, nil
+}
+
+func jobName(elems ...string) string {
+	name := strings.Join(elems, "-")
+	name = strings.ToLower(name)
+	if len(name) > 63 {
+		digest := sha256.Sum256([]byte(name))
+		return name[0:52] + "-" + hex.EncodeToString(digest[0:])[0:10]
+	}
+	return name
 }
 
 func jobLabels(jobName, hookName string, event managedupgradev1beta1.UpgradeEvent) map[string]string {

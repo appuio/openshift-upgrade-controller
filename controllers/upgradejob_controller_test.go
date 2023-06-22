@@ -79,7 +79,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	}
 	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "notify",
+			Name:      strings.Repeat("notify", 10),
 			Namespace: "appuio-openshift-upgrade-controller",
 		},
 		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
