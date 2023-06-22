@@ -50,15 +50,15 @@ spec:
                   the outcome of the upgrade. `Finish`, `Success`, and `Failure` do
                   not influence the outcome of the upgrade, Job completion will not
                   be checked, they are only used for informational purposes.
-                enum:
-                - Create
-                - Start
-                - UpgradeComplete
-                - Finish
-                - Success
-                - Failure
                 items:
                   description: UpgradeEvent is the type for upgrade events.
+                  enum:
+                  - Create
+                  - Start
+                  - UpgradeComplete
+                  - Finish
+                  - Success
+                  - Failure
                   type: string
                 type: array
               run:

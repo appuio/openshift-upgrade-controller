@@ -7,6 +7,7 @@ import (
 )
 
 // UpgradeEvent is the type for upgrade events.
+// +kubebuilder:validation:Enum=Create;Start;UpgradeComplete;Finish;Success;Failure
 type UpgradeEvent string
 
 func (e UpgradeEvent) InfluencesOutcome() bool {
@@ -55,7 +56,6 @@ type UpgradeJobHookSpec struct {
 	// `Create`, `Start`, and `UpgradeComplete` are the events that influence the outcome of the upgrade.
 	// `Finish`, `Success`, and `Failure` do not influence the outcome of the upgrade,
 	// Job completion will not be checked, they are only used for informational purposes.
-	// +kubebuilder:validation:Enum=Create;Start;UpgradeComplete;Finish;Success;Failure
 	On []UpgradeEvent `json:"on,omitempty"`
 	// Run defines if the hook is executed for the `Next` or `All` jobs.
 	// Defaults to `All`.
