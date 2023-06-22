@@ -2,7 +2,10 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,7 +15,7 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
 	batchv1 "k8s.io/api/batch/v1"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -481,20 +484,54 @@ func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(ctx context.Context, uj *
 }
 
 func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedupgradev1beta1.UpgradeJobHook, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent) (batchv1.Job, error) {
+	l := log.FromContext(ctx)
+	tmpl := hook.Spec.Template.DeepCopy()
+
 	ll := make(map[string]string)
-	maps.Copy(ll, hook.Spec.Template.Labels)
+	maps.Copy(ll, tmpl.Labels)
 	maps.Copy(ll, jobLabels(uj.Name, hook.Name, event))
+
+	normalizedEvent := map[string]any{
+		"name": string(event),
+	}
+
+	normalizedUJ, err := normalizeAsJson(uj)
+	if err != nil {
+		return batchv1.Job{}, fmt.Errorf("failed to normalize upgrade job: %w", err)
+	}
+
+	evm := map[string]any{
+		"EVENT": normalizedEvent,
+		"JOB":   normalizedUJ,
+	}
+
+	flattenInto("EVENT", normalizedEvent, evm)
+	flattenInto("JOB", normalizedUJ, evm)
+
+	envs := make([]corev1.EnvVar, 0, len(evm))
+	for k, v := range evm {
+		mv, err := json.Marshal(v)
+		if err != nil {
+			l.Info("failed to marshal value", "key", k, "value", v, "error", err)
+			continue
+		}
+		envs = append(envs, corev1.EnvVar{Name: k, Value: string(mv)})
+	}
+
+	for i := range tmpl.Spec.Template.Spec.Containers {
+		tmpl.Spec.Template.Spec.Containers[i].Env = append(tmpl.Spec.Template.Spec.Containers[i].Env, envs...)
+	}
 
 	job := batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			// TODO(bastjan): always generate valid names
 			Name:        strings.ToLower(fmt.Sprintf("%s-%s-%s-hook", uj.Name, hook.Name, event)),
 			Namespace:   uj.Namespace,
-			Annotations: hook.Spec.Template.Annotations,
+			Annotations: tmpl.Annotations,
 			Labels:      ll,
 			Finalizers:  []string{UpgradeJobHookJobFinalizer},
 		},
-		Spec: hook.Spec.Template.Spec,
+		Spec: tmpl.Spec,
 	}
 
 	if err := ctrl.SetControllerReference(uj, &job, r.Scheme); err != nil {
@@ -524,7 +561,7 @@ func prefixJobLabel(name string) string {
 // It does not discriminate between successful and failed terminations.
 func isJobFinished(j batchv1.Job) bool {
 	for _, c := range j.Status.Conditions {
-		if (c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) && c.Status == v1.ConditionTrue {
+		if (c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) && c.Status == corev1.ConditionTrue {
 			return true
 		}
 	}
@@ -534,9 +571,47 @@ func isJobFinished(j batchv1.Job) bool {
 // jobFailedCondition returns the JobCondition with type JobFailed if it exists and is true, nil otherwise.
 func jobFailedCondition(j batchv1.Job) *batchv1.JobCondition {
 	for _, c := range j.Status.Conditions {
-		if c.Type == batchv1.JobFailed && c.Status == v1.ConditionTrue {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
 			return &c
 		}
 	}
 	return nil
+}
+
+func normalizeAsJson(obj any) (normalized map[string]any, err error) {
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(b, &normalized)
+	return
+}
+
+func flattenInto(prefix string, obj any, target map[string]any) {
+	fmtPrefix := func(s string) string {
+		if s != "" {
+			s += "_"
+		}
+		return s
+	}
+
+	switch o := obj.(type) {
+	case map[string]any:
+		for k, v := range o {
+			flattenInto(fmtPrefix(prefix)+cleanEnvVarName(k), v, target)
+		}
+	case []any:
+		for i, v := range o {
+			flattenInto(fmtPrefix(prefix)+strconv.Itoa(i), v, target)
+		}
+	default:
+		target[prefix] = o
+	}
+}
+
+var envVarAllowedChars = regexp.MustCompile("[^a-zA-Z0-9_]")
+
+func cleanEnvVarName(name string) string {
+	return envVarAllowedChars.ReplaceAllString(name, "_")
 }

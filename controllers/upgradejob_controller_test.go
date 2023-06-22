@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -340,6 +342,125 @@ func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
 
 	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFailure, false)
 	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, false)
+}
+
+func Test_UpgradeJobReconciler_Reconcile_HookJobContainerEnv(t *testing.T) {
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+			Labels:    map[string]string{"test": "test"},
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(-time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-7 * time.Hour)),
+			DesiredVersion: configv1.Update{
+				Version: "4.5.13",
+			},
+		},
+		Status: managedupgradev1beta1.UpgradeJobStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:   managedupgradev1beta1.UpgradeJobConditionStarted,
+					Status: metav1.ConditionTrue,
+				},
+			},
+		},
+	}
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notify",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			FailurePolicy: managedupgradev1beta1.FailurePolicyAbort,
+			On: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventCreate,
+			},
+			Template: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name: "test1",
+									Env: []corev1.EnvVar{{
+										Name:  "TEST",
+										Value: "test",
+									}},
+								},
+								{
+									Name: "test2",
+									Env: []corev1.EnvVar{{
+										Name:  "TEST",
+										Value: "test",
+									}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	c := controllerClient(t, upgradeJob, upgradeJobHook,
+		&configv1.ClusterVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "version",
+			}})
+
+	subject := &UpgradeJobReconciler{
+		Client: c,
+		Scheme: c.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	job := checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, true)
+
+	require.Equal(t, 2, len(job.Spec.Template.Spec.Containers))
+
+	for _, c := range job.Spec.Template.Spec.Containers {
+		isJsonObj := func(v string) (bool, error) {
+			return json.Valid([]byte(v)) && strings.HasPrefix(v, "{"), nil
+		}
+		matchStr := func(str string) func(v string) (bool, error) {
+			return func(v string) (bool, error) {
+				return v == str, nil
+			}
+		}
+
+		requireEnv(t, c.Env, "TEST", matchStr("test"))
+		requireEnv(t, c.Env, "JOB", isJsonObj)
+		requireEnv(t, c.Env, "JOB_metadata_name", matchStr("\"upgrade-1234-4-5-13\""))
+		requireEnv(t, c.Env, "JOB_spec_desiredVersion_version", matchStr("\"4.5.13\""))
+		requireEnv(t, c.Env, "JOB_spec_startAfter", matchStr("\"2022-12-04T15:45:00Z\""))
+		requireEnv(t, c.Env, "JOB_status_conditions_0_type", matchStr("\"Started\""))
+		requireEnv(t, c.Env, "EVENT", isJsonObj)
+		requireEnv(t, c.Env, "EVENT_name", matchStr("\"Create\""))
+	}
+}
+
+func requireEnv(t *testing.T, list []corev1.EnvVar, name string, valueMatcher func(string) (bool, error)) {
+	t.Helper()
+
+	for _, env := range list {
+		if env.Name == name {
+			ok, err := valueMatcher(env.Value)
+			require.NoError(t, err)
+			require.Truef(t, ok, "env %s has unexpected value %q", name, env.Value)
+			return
+		}
+	}
+	require.Failf(t, "env not found", "env %q not found", name)
 }
 
 func Test_UpgradeJobReconciler_Reconcile_Expired(t *testing.T) {
@@ -702,7 +823,7 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 		Build()
 }
 
-func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent, fail bool) {
+func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent, fail bool) batchv1.Job {
 	t.Helper()
 	ctx := context.Background()
 
@@ -733,4 +854,5 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 		Status: corev1.ConditionTrue,
 	})
 	require.NoError(t, c.Status().Update(ctx, &job))
+	return job
 }
