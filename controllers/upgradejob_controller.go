@@ -420,7 +420,12 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 		if !sel.Matches(labels.Set(uj.Labels)) {
 			continue
 		}
-		hooks = append(hooks, hook)
+		if ok, upd := hook.Claim(uj); ok {
+			if upd {
+				return false, r.Status().Update(ctx, &hook)
+			}
+			hooks = append(hooks, hook)
+		}
 	}
 
 	activeJobs := []string{}

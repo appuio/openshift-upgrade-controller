@@ -4,6 +4,8 @@ import (
 	"golang.org/x/exp/slices"
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // UpgradeEvent is the type for upgrade events.
@@ -97,6 +99,24 @@ func (s UpgradeJobHookSpec) GetFailurePolicy() string {
 
 // UpgradeJobHookStatus defines the observed state of UpgradeJobHook
 type UpgradeJobHookStatus struct {
+	// ClaimedBy is the owner reference of the job that claimed the hook.
+	// Only used for hooks with `run: Next`.
+	ClaimedBy ClaimReference `json:"claimedBy,omitempty"`
+}
+
+// ClaimReference contains enough information to let you identify an owning
+// object. An owning object must be in the same namespace as the dependent, or
+// be cluster-scoped, so there is no namespace field.
+// +structType=atomic
+type ClaimReference struct {
+	// API version of the referent.
+	APIVersion string `json:"apiVersion" protobuf:"bytes,5,opt,name=apiVersion"`
+	// Kind of the referent.
+	Kind string `json:"kind" protobuf:"bytes,1,opt,name=kind"`
+	// Name of the referent.
+	Name string `json:"name" protobuf:"bytes,3,opt,name=name"`
+	// UID of the referent.
+	UID types.UID `json:"uid" protobuf:"bytes,4,opt,name=uid,casttype=k8s.io/apimachinery/pkg/types.UID"`
 }
 
 //+kubebuilder:object:root=true
@@ -109,6 +129,33 @@ type UpgradeJobHook struct {
 
 	Spec   UpgradeJobHookSpec   `json:"spec,omitempty"`
 	Status UpgradeJobHookStatus `json:"status,omitempty"`
+}
+
+// Claim claims the hook for the given claimer.
+// Returns true if the hook was claimed, false if it was already claimed.
+// Second return value is true if the hooks status was updated.
+func (u *UpgradeJobHook) Claim(claimer client.Object) (ok, updated bool) {
+	if u.Spec.GetRun() != RunNext {
+		return true, false
+	}
+
+	ref := ClaimReference{
+		APIVersion: claimer.GetObjectKind().GroupVersionKind().GroupVersion().String(),
+		Kind:       claimer.GetObjectKind().GroupVersionKind().Kind,
+		Name:       claimer.GetName(),
+		UID:        claimer.GetUID(),
+	}
+
+	if u.Status.ClaimedBy == ref {
+		return true, false
+	}
+
+	if u.Status.ClaimedBy == (ClaimReference{}) {
+		u.Status.ClaimedBy = ref
+		return true, true
+	}
+
+	return false, false
 }
 
 //+kubebuilder:object:root=true

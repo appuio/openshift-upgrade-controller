@@ -449,6 +449,85 @@ func Test_UpgradeJobReconciler_Reconcile_HookJobContainerEnv(t *testing.T) {
 	}
 }
 
+func Test_UpgradeJobReconciler_Reconcile_ClaimNextHook(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+			Labels:    map[string]string{"test": "test"},
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(-time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-7 * time.Hour)),
+		},
+	}
+	upgradeJob2 := upgradeJob.DeepCopy()
+	upgradeJob2.Name = "upgrade-1234-4-5-14"
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notify",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			Run: managedupgradev1beta1.RunNext,
+			On: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventCreate,
+			},
+		},
+	}
+
+	c := controllerClient(t, upgradeJob, upgradeJob2, upgradeJobHook,
+		&configv1.ClusterVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "version",
+			}})
+
+	subject := &UpgradeJobReconciler{
+		Client: c,
+		Scheme: c.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	for i := 0; i < 3; i++ {
+		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
+		require.NoError(t, err)
+	}
+
+	var jobs batchv1.JobList
+	require.NoError(t, c.List(ctx, &jobs))
+	require.Equal(t, 1, len(jobs.Items), "hook job should be created")
+
+	expectedClaim := managedupgradev1beta1.ClaimReference{
+		APIVersion: "managedupgrade.appuio.io/v1beta1",
+		Kind:       "UpgradeJob",
+		Name:       upgradeJob.Name,
+		UID:        upgradeJob.UID,
+	}
+
+	require.NoError(t, c.Get(ctx, requestForObject(upgradeJobHook).NamespacedName, upgradeJobHook))
+	require.Equal(t, expectedClaim, upgradeJobHook.Status.ClaimedBy, "hook should be claimed by upgrade job")
+
+	for i := 0; i < 3; i++ {
+		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, c.Get(ctx, requestForObject(upgradeJobHook).NamespacedName, upgradeJobHook))
+	require.Equal(t, expectedClaim, upgradeJobHook.Status.ClaimedBy, "hook should still be claimed by upgrade job")
+
+	require.NoError(t, c.List(ctx, &jobs))
+	require.Equal(t, 1, len(jobs.Items), "no additional jobs should be created")
+}
+
 func requireEnv(t *testing.T, list []corev1.EnvVar, name string, valueMatcher func(string) (bool, error)) {
 	t.Helper()
 
@@ -816,6 +895,7 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 		WithStatusSubresource(
 			&managedupgradev1beta1.UpgradeConfig{},
 			&managedupgradev1beta1.UpgradeJob{},
+			&managedupgradev1beta1.UpgradeJobHook{},
 			&configv1.ClusterVersion{},
 			&batchv1.Job{},
 			&machineconfigurationv1.MachineConfigPool{},
@@ -839,9 +919,9 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 	for i := 0; i < 3; i++ {
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
-		require.NoError(t, c.List(ctx, &jobs, sel))
-		require.Lenf(t, jobs.Items, 1, "should create a job with %q labels", sel)
 	}
+	require.NoError(t, c.List(ctx, &jobs, sel))
+	require.Lenf(t, jobs.Items, 1, "should create a job with %q labels", sel)
 
 	ct := batchv1.JobComplete
 	if fail {

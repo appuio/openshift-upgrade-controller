@@ -8758,6 +8758,30 @@ spec:
             type: object
           status:
             description: UpgradeJobHookStatus defines the observed state of UpgradeJobHook
+            properties:
+              claimedBy:
+                description: 'ClaimedBy is the owner reference of the job that claimed
+                  the hook. Only used for hooks with `run: Next`.'
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  kind:
+                    description: Kind of the referent.
+                    type: string
+                  name:
+                    description: Name of the referent.
+                    type: string
+                  uid:
+                    description: UID of the referent.
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                - uid
+                type: object
+                x-kubernetes-map-type: atomic
             type: object
         type: object
     served: true
