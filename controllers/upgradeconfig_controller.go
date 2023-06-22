@@ -134,7 +134,7 @@ findNextRun:
 	latestUpdate := clusterversion.LatestAvailableUpdate(cv)
 	if latestUpdate == nil {
 		l.Info("no updates available")
-		return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
 	}
 
 	// Schedule is suspended, do nothing
@@ -191,6 +191,7 @@ func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConf
 func (r *UpgradeConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&managedupgradev1beta1.UpgradeConfig{}).
+		Owns(&managedupgradev1beta1.UpgradeJob{}).
 		Complete(r)
 }
 
