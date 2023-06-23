@@ -199,6 +199,27 @@ spec:
                   - type
                   type: object
                 type: array
+              hookTracker:
+                description: HookJobTracker keeps track of the hooks that have been
+                  executed
+                items:
+                  description: HookJobTracker keeps track of the hooks that have been
+                    executed
+                  properties:
+                    hookEvent:
+                      description: HookEvent is the event of the hook
+                      type: string
+                    message:
+                      description: Message is the message for the status
+                      type: string
+                    status:
+                      description: Status is the status of the hook
+                      type: string
+                    upgradeJobHook:
+                      description: UpdgradeJobHook is the hook that was executed
+                      type: string
+                  type: object
+                type: array
             type: object
         type: object
     served: true

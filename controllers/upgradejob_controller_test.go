@@ -341,7 +341,18 @@ func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
 	)
 
 	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFailure, false)
-	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, false)
+
+	require.NoError(t, c.Delete(ctx, upgradeJob))
+	// Reconcile can still be called after the job is deleted since we have controller references with finalizers
+	_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
+	require.NoError(t, err)
+	var jobs batchv1.JobList
+	require.NoError(t, c.List(ctx, &jobs))
+	finalizers := []string{}
+	for _, job := range jobs.Items {
+		finalizers = append(finalizers, job.Finalizers...)
+	}
+	require.Empty(t, finalizers, "finalizers should be empty or job deleted")
 }
 
 func Test_UpgradeJobReconciler_Reconcile_HookJobContainerEnv(t *testing.T) {
@@ -497,10 +508,7 @@ func Test_UpgradeJobReconciler_Reconcile_ClaimNextHook(t *testing.T) {
 		ManagedUpstreamClusterVersionName: "version",
 	}
 
-	for i := 0; i < 3; i++ {
-		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
-		require.NoError(t, err)
-	}
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
 
 	var jobs batchv1.JobList
 	require.NoError(t, c.List(ctx, &jobs))
@@ -516,10 +524,7 @@ func Test_UpgradeJobReconciler_Reconcile_ClaimNextHook(t *testing.T) {
 	require.NoError(t, c.Get(ctx, requestForObject(upgradeJobHook).NamespacedName, upgradeJobHook))
 	require.Equal(t, expectedClaim, upgradeJobHook.Status.ClaimedBy, "hook should be claimed by upgrade job")
 
-	for i := 0; i < 3; i++ {
-		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
-		require.NoError(t, err)
-	}
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
 
 	require.NoError(t, c.Get(ctx, requestForObject(upgradeJobHook).NamespacedName, upgradeJobHook))
 	require.Equal(t, expectedClaim, upgradeJobHook.Status.ClaimedBy, "hook should still be claimed by upgrade job")
@@ -626,10 +631,7 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 		ManagedUpstreamClusterVersionName: "version",
 	}
 
-	for i := 0; i < 10; i++ {
-		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
-		require.NoError(t, err)
-	}
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 10)
 
 	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 	failedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
@@ -908,20 +910,17 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 	ctx := context.Background()
 
 	var jobs batchv1.JobList
-	var err error
 
 	sel := client.MatchingLabels{
-		managedupgradev1beta1.GroupVersion.Group + "/upgradejobhook": upgradeJobHook.Name,
-		managedupgradev1beta1.GroupVersion.Group + "/upgradejob":     upgradeJob.Name,
-		managedupgradev1beta1.GroupVersion.Group + "/event":          string(event),
+		hookJobTrackingLabelUpgradeJobHook: upgradeJobHook.Name,
+		hookJobTrackingLabelUpgradeJob:     upgradeJob.Name,
+		hookJobTrackingLabelEvent:          string(event),
 	}
 
-	for i := 0; i < 3; i++ {
-		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
-		require.NoError(t, err)
-	}
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
 	require.NoError(t, c.List(ctx, &jobs, sel))
 	require.Lenf(t, jobs.Items, 1, "should create a job with %q labels", sel)
+	require.Contains(t, jobs.Items[0].Finalizers, UpgradeJobHookJobTrackerFinalizer, "should add finalizer to job")
 
 	ct := batchv1.JobComplete
 	if fail {
@@ -934,5 +933,15 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 		Status: corev1.ConditionTrue,
 	})
 	require.NoError(t, c.Status().Update(ctx, &job))
+
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	require.NoError(t, c.List(ctx, &jobs, sel))
+	require.Lenf(t, jobs.Items, 1, "should create a job with %q labels", sel)
+	require.NotContains(t, jobs.Items[0].Finalizers, UpgradeJobHookJobTrackerFinalizer, "should have removed finalizer from job after completion")
+	var uj managedupgradev1beta1.UpgradeJob
+	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, &uj))
+	tracked := findTrackedHookJob(upgradeJobHook.Name, string(event), uj)
+	require.NotEmpty(t, tracked, "should have tracked hook job")
+
 	return job
 }

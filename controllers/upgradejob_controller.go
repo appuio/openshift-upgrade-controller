@@ -18,13 +18,16 @@ import (
 	"golang.org/x/exp/slices"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -46,7 +49,13 @@ type UpgradeJobReconciler struct {
 
 var ClusterVersionLockAnnotation = managedupgradev1beta1.GroupVersion.Group + "/upgrade-job"
 
-const UpgradeJobHookJobFinalizer = "upgradejobhooks.managedupgrade.appuio.io/job"
+const (
+	UpgradeJobHookJobTrackerFinalizer = "upgradejobs.managedupgrade.appuio.io/hook-job-tracker"
+
+	hookJobTrackingLabelUpgradeJobHook = "upgradejobs.managedupgrade.appuio.io/upgradejobhook"
+	hookJobTrackingLabelUpgradeJob     = "upgradejobs.managedupgrade.appuio.io/upgradejobk"
+	hookJobTrackingLabelEvent          = "upgradejobs.managedupgrade.appuio.io/event"
+)
 
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch
@@ -65,6 +74,10 @@ const UpgradeJobHookJobFinalizer = "upgradejobhooks.managedupgrade.appuio.io/job
 func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.Reconcile")
 	l.Info("Reconciling UpgradeJob")
+
+	if err := r.trackHookJobs(ctx, req); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to track hook jobs: %w", err)
+	}
 
 	var uj managedupgradev1beta1.UpgradeJob
 	if err := r.Get(ctx, req.NamespacedName, &uj); err != nil {
@@ -441,16 +454,16 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 			continue
 		}
 		for _, job := range jobs {
-			if !isJobFinished(job) {
-				activeJobs = append(activeJobs, job.Name)
+
+			if job.Status == managedupgradev1beta1.HookJobTrackerStatusActive {
+				activeJobs = append(activeJobs, job.UpgradeJobHookName)
 				continue
 			}
 
-			c := jobFailedCondition(job)
-			if c != nil && hook.Spec.GetFailurePolicy() == managedupgradev1beta1.FailurePolicyIgnore {
-				l.Info("hook failed but failure policy is ignore", "hook", hook.Name, "job", job.Name, "reason", c.Reason, "message", c.Message)
-			} else if c != nil {
-				failedJobs = append(failedJobs, fmt.Sprintf("hook %q failed with %q: %s", hook.Name, c.Reason, c.Message))
+			if job.Status == managedupgradev1beta1.HookJobTrackerStatusFailed && hook.Spec.GetFailurePolicy() == managedupgradev1beta1.FailurePolicyIgnore {
+				l.Info("hook failed but failure policy is ignore", "hook", hook.Name, "message", job.Message)
+			} else if job.Status == managedupgradev1beta1.HookJobTrackerStatusFailed {
+				failedJobs = append(failedJobs, fmt.Sprintf("hook %q failed: %s", hook.Name, job.Message))
 			}
 		}
 	}
@@ -478,19 +491,34 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 	return true, nil
 }
 
-func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, hook managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent) ([]batchv1.Job, error) {
+func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, hook managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent) ([]managedupgradev1beta1.HookJobTracker, error) {
 	var jobs batchv1.JobList
 	if err := r.List(ctx, &jobs, client.InNamespace(uj.Namespace), client.MatchingLabels(jobLabels(uj.Name, hook.Name, event))); err != nil {
 		return nil, err
 	}
-	if len(jobs.Items) == 0 {
-		j, err := r.createHookJob(ctx, hook, uj, event)
-		return []batchv1.Job{j}, err
+
+	jobStatus := findTrackedHookJob(hook.Name, string(event), *uj)
+	slices.Grow(jobStatus, len(jobs.Items))
+	for _, job := range jobs.Items {
+		st, msg := hookStatusFromJob(job)
+		jobStatus = append(jobStatus, managedupgradev1beta1.HookJobTracker{
+			HookEvent:          string(event),
+			UpgradeJobHookName: hook.Name,
+			Status:             st,
+			Message:            msg,
+		})
 	}
-	if len(jobs.Items) > 1 {
-		log.FromContext(ctx).Error(fmt.Errorf("found multiple jobs for upgrade job %q hook %q event %q", uj.Name, hook.Name, event), "jobs", jobs.Items)
+
+	if len(jobStatus) > 0 {
+		return jobStatus, nil
 	}
-	return jobs.Items, nil
+
+	_, err := r.createHookJob(ctx, hook, uj, event)
+	return []managedupgradev1beta1.HookJobTracker{{
+		HookEvent:          string(event),
+		UpgradeJobHookName: hook.Name,
+		Status:             managedupgradev1beta1.HookJobTrackerStatusActive,
+	}}, err
 }
 
 func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedupgradev1beta1.UpgradeJobHook, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent) (batchv1.Job, error) {
@@ -544,7 +572,7 @@ func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedup
 			Namespace:   uj.Namespace,
 			Annotations: tmpl.Annotations,
 			Labels:      ll,
-			Finalizers:  []string{UpgradeJobHookJobFinalizer},
+			Finalizers:  []string{UpgradeJobHookJobTrackerFinalizer},
 		},
 		Spec: tmpl.Spec,
 	}
@@ -572,14 +600,10 @@ func jobName(elems ...string) string {
 
 func jobLabels(jobName, hookName string, event managedupgradev1beta1.UpgradeEvent) map[string]string {
 	return map[string]string{
-		prefixJobLabel("upgradejobhook"): hookName,
-		prefixJobLabel("upgradejob"):     jobName,
-		prefixJobLabel("event"):          string(event),
+		hookJobTrackingLabelUpgradeJobHook: hookName,
+		hookJobTrackingLabelUpgradeJob:     jobName,
+		hookJobTrackingLabelEvent:          string(event),
 	}
-}
-
-func prefixJobLabel(name string) string {
-	return fmt.Sprintf("%s/%s", managedupgradev1beta1.GroupVersion.Group, name)
 }
 
 // isJobFinished checks whether the given Job has finished execution.
@@ -613,6 +637,8 @@ func normalizeAsJson(obj any) (normalized map[string]any, err error) {
 	return
 }
 
+// flattenInto takes normalized JSON and flattens objects into target.
+// For example, {"a": {"b": 1}} becomes {"a_b": 1}.
 func flattenInto(prefix string, obj any, target map[string]any) {
 	fmtPrefix := func(s string) string {
 		if s != "" {
@@ -639,4 +665,95 @@ var envVarAllowedChars = regexp.MustCompile("[^a-zA-Z0-9_]")
 
 func cleanEnvVarName(name string) string {
 	return envVarAllowedChars.ReplaceAllString(name, "_")
+}
+
+func (r *UpgradeJobReconciler) trackHookJobs(ctx context.Context, req ctrl.Request) error {
+	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.trackHookJobs")
+	var uj managedupgradev1beta1.UpgradeJob
+	err := r.Get(ctx, req.NamespacedName, &uj)
+
+	if err != nil && apierrors.IsNotFound(err) {
+		//
+		l.Info("upgrade job not found, cleaning tracking finalizers")
+		return r.cleanupHookJobTrackingFinalizers(ctx, req.NamespacedName)
+	} else if err != nil {
+		return err
+	}
+
+	var jl batchv1.JobList
+	if err := r.List(ctx, &jl, client.MatchingLabels{hookJobTrackingLabelUpgradeJob: uj.Name}, client.InNamespace(uj.Namespace)); err != nil {
+		return err
+	}
+
+	tr := make([]managedupgradev1beta1.HookJobTracker, 0, len(jl.Items))
+	for _, j := range jl.Items {
+		s := managedupgradev1beta1.HookJobTracker{
+			HookEvent:          j.Labels[hookJobTrackingLabelEvent],
+			UpgradeJobHookName: j.Labels[hookJobTrackingLabelUpgradeJobHook],
+		}
+
+		s.Status, s.Message = hookStatusFromJob(j)
+
+		tr = append(tr, s)
+	}
+
+	if !sets.New(uj.Status.HookJobTracker...).Equal(sets.New(tr...)) {
+		uj.Status.HookJobTracker = tr
+		if err := r.Status().Update(ctx, &uj); err != nil {
+			return err
+		}
+	}
+
+	// After updating the status we can remove the finalizers from finished jobs.
+	// note: We should not reload the jobs here, as we might miss jobs that were just completed while
+	// we were updating the status.
+	errs := make([]error, 0, len(jl.Items))
+	for _, j := range jl.Items {
+		if !isJobFinished(j) {
+			continue
+		}
+		if controllerutil.RemoveFinalizer(&j, UpgradeJobHookJobTrackerFinalizer) {
+			errs = append(errs, r.Update(ctx, &j))
+		}
+	}
+
+	return multierr.Combine(errs...)
+}
+
+func hookStatusFromJob(j batchv1.Job) (status managedupgradev1beta1.HookJobTrackerStatus, msg string) {
+	status = managedupgradev1beta1.HookJobTrackerStatusActive
+	if isJobFinished(j) {
+		status = managedupgradev1beta1.HookJobTrackerStatusComplete
+		if c := jobFailedCondition(j); c != nil {
+			status = managedupgradev1beta1.HookJobTrackerStatusFailed
+			msg = c.Message
+		}
+	}
+	return
+}
+
+func (r *UpgradeJobReconciler) cleanupHookJobTrackingFinalizers(ctx context.Context, nn types.NamespacedName) error {
+	var jl batchv1.JobList
+	if err := r.List(ctx, &jl, client.MatchingLabels{hookJobTrackingLabelUpgradeJob: nn.Name}, client.InNamespace(nn.Namespace)); err != nil {
+		return err
+	}
+
+	errs := make([]error, 0, len(jl.Items))
+	for _, j := range jl.Items {
+		if controllerutil.RemoveFinalizer(&j, UpgradeJobHookJobTrackerFinalizer) {
+			errs = append(errs, r.Update(ctx, &j))
+		}
+	}
+
+	return multierr.Combine(errs...)
+}
+
+func findTrackedHookJob(ujhookName, event string, uj managedupgradev1beta1.UpgradeJob) []managedupgradev1beta1.HookJobTracker {
+	f := make([]managedupgradev1beta1.HookJobTracker, 0, len(uj.Status.HookJobTracker))
+	for _, h := range uj.Status.HookJobTracker {
+		if h.UpgradeJobHookName == ujhookName && h.HookEvent == event {
+			f = append(f, h)
+		}
+	}
+	return f
 }

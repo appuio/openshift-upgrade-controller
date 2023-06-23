@@ -9,9 +9,10 @@ metadata:
     app.kubernetes.io/created-by: openshift-upgrade-controller
   name: upgradejobhook-sample
 spec:
-  on:
+  "on":
     - Create
     - Start
+    - UpgradeComplete
     - Finish
     - Success
     - Failure
@@ -19,7 +20,7 @@ spec:
   failurePolicy: Ignore # [Abort, Ignore]
   selector:
     matchLabels:
-      upgrade-config: cluster-upgrade
+      upgradeconfig/name: upgradeconfig-sample
   template:
     spec:
       template:

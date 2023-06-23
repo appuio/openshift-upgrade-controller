@@ -15,7 +15,11 @@ spec:
   schedule:
     cron: "0 10 * * 2"
     location: Europe/Zurich
+    suspend: false
   jobTemplate:
+    metadata:
+      labels:
+        upgradeconfig/name: upgradeconfig-sample
     spec:
       config:
         upgradeTimeout: 12h
