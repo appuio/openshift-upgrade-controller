@@ -527,7 +527,13 @@ func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedup
 		}
 		envs = append(envs, corev1.EnvVar{Name: k, Value: string(mv)})
 	}
+	slices.SortFunc(envs, func(a, b corev1.EnvVar) bool {
+		return a.Name < b.Name
+	})
 
+	for i := range tmpl.Spec.Template.Spec.InitContainers {
+		tmpl.Spec.Template.Spec.InitContainers[i].Env = append(tmpl.Spec.Template.Spec.InitContainers[i].Env, envs...)
+	}
 	for i := range tmpl.Spec.Template.Spec.Containers {
 		tmpl.Spec.Template.Spec.Containers[i].Env = append(tmpl.Spec.Template.Spec.Containers[i].Env, envs...)
 	}
