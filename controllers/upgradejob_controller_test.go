@@ -86,7 +86,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 			Selector: metav1.LabelSelector{
 				MatchLabels: upgradeJob.Labels,
 			},
-			On: []managedupgradev1beta1.UpgradeEvent{
+			Events: []managedupgradev1beta1.UpgradeEvent{
 				managedupgradev1beta1.EventCreate,
 				managedupgradev1beta1.EventStart,
 				managedupgradev1beta1.EventUpgradeComplete,
@@ -307,7 +307,7 @@ func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
 				MatchLabels: upgradeJob.Labels,
 			},
 			FailurePolicy: managedupgradev1beta1.FailurePolicyAbort,
-			On: []managedupgradev1beta1.UpgradeEvent{
+			Events: []managedupgradev1beta1.UpgradeEvent{
 				managedupgradev1beta1.EventCreate,
 				managedupgradev1beta1.EventFailure,
 				managedupgradev1beta1.EventFinish,
@@ -390,7 +390,7 @@ func Test_UpgradeJobReconciler_Reconcile_HookJobContainerEnv(t *testing.T) {
 				MatchLabels: upgradeJob.Labels,
 			},
 			FailurePolicy: managedupgradev1beta1.FailurePolicyAbort,
-			On: []managedupgradev1beta1.UpgradeEvent{
+			Events: []managedupgradev1beta1.UpgradeEvent{
 				managedupgradev1beta1.EventCreate,
 			},
 			Template: batchv1.JobTemplateSpec{
@@ -487,7 +487,7 @@ func Test_UpgradeJobReconciler_Reconcile_ClaimNextHook(t *testing.T) {
 				MatchLabels: upgradeJob.Labels,
 			},
 			Run: managedupgradev1beta1.RunNext,
-			On: []managedupgradev1beta1.UpgradeEvent{
+			Events: []managedupgradev1beta1.UpgradeEvent{
 				managedupgradev1beta1.EventCreate,
 			},
 		},

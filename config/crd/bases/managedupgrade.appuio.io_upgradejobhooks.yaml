@@ -34,22 +34,12 @@ spec:
           spec:
             description: UpgradeJobHookSpec defines the desired state of UpgradeJobHook
             properties:
-              failurePolicy:
-                description: FailurePolicy defines the policy for handling failures.
-                  If `Abort` the upgrade is aborted and the job is marked as failed.
-                  If `Ignore` the upgrade continues and the job is marked as success.
-                  Defaults to `Ignore`. More advanced failure policies can be handled
-                  through the upstream Job failure handling mechanisms.
-                enum:
-                - Abort
-                - Ignore
-                type: string
-              "on":
-                description: On is the list of events to trigger the hook to be executed.
-                  `Create`, `Start`, and `UpgradeComplete` are the events that influence
-                  the outcome of the upgrade. `Finish`, `Success`, and `Failure` do
-                  not influence the outcome of the upgrade, Job completion will not
-                  be checked, they are only used for informational purposes.
+              events:
+                description: Events is the list of events to trigger the hook to be
+                  executed. `Create`, `Start`, and `UpgradeComplete` are the events
+                  that influence the outcome of the upgrade. `Finish`, `Success`,
+                  and `Failure` do not influence the outcome of the upgrade, Job completion
+                  will not be checked, they are only used for informational purposes.
                 items:
                   description: UpgradeEvent is the type for upgrade events.
                   enum:
@@ -61,6 +51,16 @@ spec:
                   - Failure
                   type: string
                 type: array
+              failurePolicy:
+                description: FailurePolicy defines the policy for handling failures.
+                  If `Abort` the upgrade is aborted and the job is marked as failed.
+                  If `Ignore` the upgrade continues and the job is marked as success.
+                  Defaults to `Ignore`. More advanced failure policies can be handled
+                  through the upstream Job failure handling mechanisms.
+                enum:
+                - Abort
+                - Ignore
+                type: string
               run:
                 description: Run defines if the hook is executed for the `Next` or
                   `All` jobs. Defaults to `All`.

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/created-by: openshift-upgrade-controller
   name: upgradejobhook-sample
 spec:
-  "on":
+  events:
     - Create
     - Start
     - UpgradeComplete

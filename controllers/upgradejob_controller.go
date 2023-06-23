@@ -425,7 +425,7 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 
 	hooks := make([]managedupgradev1beta1.UpgradeJobHook, 0, len(allHooks.Items))
 	for _, hook := range allHooks.Items {
-		if !slices.Contains(hook.Spec.On, event) {
+		if !slices.Contains(hook.Spec.Events, event) {
 			continue
 		}
 		sel, err := metav1.LabelSelectorAsSelector(&hook.Spec.Selector)

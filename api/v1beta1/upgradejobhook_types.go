@@ -54,11 +54,11 @@ var eventsInfluencingOutcome = []UpgradeEvent{
 
 // UpgradeJobHookSpec defines the desired state of UpgradeJobHook
 type UpgradeJobHookSpec struct {
-	// On is the list of events to trigger the hook to be executed.
+	// Events is the list of events to trigger the hook to be executed.
 	// `Create`, `Start`, and `UpgradeComplete` are the events that influence the outcome of the upgrade.
 	// `Finish`, `Success`, and `Failure` do not influence the outcome of the upgrade,
 	// Job completion will not be checked, they are only used for informational purposes.
-	On []UpgradeEvent `json:"on,omitempty"`
+	Events []UpgradeEvent `json:"events,omitempty"`
 	// Run defines if the hook is executed for the `Next` or `All` jobs.
 	// Defaults to `All`.
 	// +kubebuilder:validation:Enum=Next;All
@@ -74,13 +74,6 @@ type UpgradeJobHookSpec struct {
 	Selector metav1.LabelSelector `json:"selector,omitempty"`
 	// Template is the job template that is executed.
 	Template batchv1.JobTemplateSpec `json:"template,omitempty"`
-}
-
-func (s UpgradeJobHookSpec) GetOn() []UpgradeEvent {
-	if s.On == nil {
-		return []UpgradeEvent{}
-	}
-	return s.On
 }
 
 func (s UpgradeJobHookSpec) GetRun() string {
