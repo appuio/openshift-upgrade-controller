@@ -70,7 +70,7 @@ type UpgradeJobHookSpec struct {
 	// More advanced failure policies can be handled through the upstream Job failure handling mechanisms.
 	// +kubebuilder:validation:Enum=Abort;Ignore
 	FailurePolicy string `json:"failurePolicy,omitempty"`
-	// Selector is the label selector that determines which jobs the hook is executed for.
+	// Selector is the label selector that determines which upgrade jobs the hook is executed for.
 	Selector metav1.LabelSelector `json:"selector,omitempty"`
 	// Template is the job template that is executed.
 	Template batchv1.JobTemplateSpec `json:"template,omitempty"`
