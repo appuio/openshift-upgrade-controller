@@ -116,7 +116,6 @@ spec:
                     - config
                     type: object
                 required:
-                - metadata
                 - spec
                 type: object
               maxSchedulingDelay:
