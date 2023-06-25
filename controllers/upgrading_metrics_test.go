@@ -56,9 +56,9 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 			Name: "pending",
 		},
 	}
-	runningJob := &managedupgradev1beta1.UpgradeJob{
+	activeJob := &managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "running",
+			Name: "active",
 		},
 		Status: managedupgradev1beta1.UpgradeJobStatus{
 			Conditions: []metav1.Condition{
@@ -101,7 +101,7 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 			},
 		},
 	}
-	c := controllerClient(t, version, masterPool, workerPool, pendingJob, runningJob, succeededJob, failedJob)
+	c := controllerClient(t, version, masterPool, workerPool, pendingJob, activeJob, succeededJob, failedJob)
 	subject := &ClusterUpgradingMetric{
 		Client: c,
 
@@ -145,12 +145,12 @@ openshift_upgrade_controller_cluster_upgrading %d
 # TYPE openshift_upgrade_controller_machine_config_pools_upgrading gauge
 openshift_upgrade_controller_machine_config_pools_upgrading{pool="master"} %d
 openshift_upgrade_controller_machine_config_pools_upgrading{pool="worker"} %d
-# HELP openshift_upgrade_controller_upgradejob_state Returns the state of jobs in the cluster. 'pending', 'running', 'succeeded', or 'failed' are possible states.
+# HELP openshift_upgrade_controller_upgradejob_state Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states.
 # TYPE openshift_upgrade_controller_upgradejob_state gauge
-openshift_upgrade_controller_upgradejob_state{job="failed",state="failed"} 1
-openshift_upgrade_controller_upgradejob_state{job="pending",state="pending"} 1
-openshift_upgrade_controller_upgradejob_state{job="running",state="running"} 1
-openshift_upgrade_controller_upgradejob_state{job="succeeded",state="succeeded"} 1
+openshift_upgrade_controller_upgradejob_state{state="failed",upgradejob="failed"} 1
+openshift_upgrade_controller_upgradejob_state{state="pending",upgradejob="pending"} 1
+openshift_upgrade_controller_upgradejob_state{state="active",upgradejob="active"} 1
+openshift_upgrade_controller_upgradejob_state{state="succeeded",upgradejob="succeeded"} 1
 `
 	return strings.NewReader(
 		fmt.Sprintf(metrics, b2i(upgrading), b2i(masterUpgrading), b2i(workerUpgrading)),

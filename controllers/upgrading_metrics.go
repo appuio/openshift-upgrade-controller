@@ -35,8 +35,8 @@ var poolsUpgradingDesc = prometheus.NewDesc(
 
 var jobStates = prometheus.NewDesc(
 	MetricsNamespace+"_upgradejob_state",
-	"Returns the state of jobs in the cluster. 'pending', 'running', 'succeeded', or 'failed' are possible states.",
-	[]string{"job", "state"},
+	"Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states.",
+	[]string{"upgradejob", "state"},
 	nil,
 )
 
@@ -122,7 +122,7 @@ func jobState(job managedupgradev1beta1.UpgradeJob) string {
 	} else if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed) {
 		return "failed"
 	} else if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted) {
-		return "running"
+		return "active"
 	}
 	return "pending"
 }
