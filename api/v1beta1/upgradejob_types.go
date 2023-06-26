@@ -31,6 +31,8 @@ const (
 	UpgradeJobReasonPostHealthCheckFailed = "PostHealthCheckFailed"
 	// UpgradeJobReasonUpgradeWithdrawn is used when the upgrade was retracted by the upstream after the upgrade job was created
 	UpgradeJobReasonUpgradeWithdrawn = "UpgradeWithdrawn"
+	// UpgradeJobReasonHookFailed is used when a hook failed
+	UpgradeJobReasonHookFailed = "HookFailed"
 	// UpgradeJobReasonStarted is used when a step of the upgrade job was started
 	UpgradeJobReasonStarted = "Started"
 	// UpgradeJobReasonSucceeded is used when a step of the upgrade job did succeed
@@ -87,7 +89,31 @@ type UpgradeJobHealthCheck struct {
 type UpgradeJobStatus struct {
 	// Conditions is a list of conditions for the UpgradeJob
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// HookJobTracker keeps track of the hooks that have been executed
+	HookJobTracker []HookJobTracker `json:"hookTracker,omitempty"`
 }
+
+// HookJobTracker keeps track of the hooks that have been executed
+type HookJobTracker struct {
+	// HookEvent is the event of the hook
+	HookEvent string `json:"hookEvent,omitempty"`
+	// UpdgradeJobHook is the hook that was executed
+	UpgradeJobHookName string `json:"upgradeJobHook,omitempty"`
+
+	// Status is the status of the hook
+	Status HookJobTrackerStatus `json:"status,omitempty"`
+	// Message is the message for the status
+	Message string `json:"message,omitempty"`
+}
+
+type HookJobTrackerStatus string
+
+const (
+	HookJobTrackerStatusComplete HookJobTrackerStatus = "complete"
+	HookJobTrackerStatusFailed   HookJobTrackerStatus = "failed"
+	HookJobTrackerStatusActive   HookJobTrackerStatus = "active"
+)
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status

@@ -7,9 +7,11 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	"github.com/prometheus/client_golang/prometheus"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
 	"github.com/appuio/openshift-upgrade-controller/pkg/healthcheck"
 )
@@ -31,6 +33,13 @@ var poolsUpgradingDesc = prometheus.NewDesc(
 	nil,
 )
 
+var jobStates = prometheus.NewDesc(
+	MetricsNamespace+"_upgradejob_state",
+	"Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states.",
+	[]string{"upgradejob", "state"},
+	nil,
+)
+
 // ClusterUpgradingMetric is a Prometheus collector that exposes the link between an organization and a billing entity.
 type ClusterUpgradingMetric struct {
 	client.Client
@@ -45,6 +54,7 @@ var _ prometheus.Collector = &ClusterUpgradingMetric{}
 func (*ClusterUpgradingMetric) Describe(ch chan<- *prometheus.Desc) {
 	ch <- clusterUpgradingDesc
 	ch <- poolsUpgradingDesc
+	ch <- jobStates
 }
 
 // Collect implements prometheus.Collector.
@@ -75,13 +85,28 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 	var cv configv1.ClusterVersion
 	if err := m.Get(ctx, client.ObjectKey{Name: m.ManagedUpstreamClusterVersionName}, &cv); err != nil {
 		ch <- prometheus.NewInvalidMetric(clusterUpgradingDesc, err)
-		return
+	} else {
+		ch <- prometheus.MustNewConstMetric(
+			clusterUpgradingDesc,
+			prometheus.GaugeValue,
+			boolToFloat64(!clusterversion.IsVersionUpgradeCompleted(cv) || len(poolsUpdating) > 0),
+		)
 	}
-	ch <- prometheus.MustNewConstMetric(
-		clusterUpgradingDesc,
-		prometheus.GaugeValue,
-		boolToFloat64(clusterversion.IsUpgrading(cv) || len(poolsUpdating) > 0),
-	)
+
+	var jobs managedupgradev1beta1.UpgradeJobList
+	if err := m.Client.List(ctx, &jobs); err != nil {
+		ch <- prometheus.NewInvalidMetric(jobStates, fmt.Errorf("failed to list upgrade jobs: %w", err))
+	}
+
+	for _, job := range jobs.Items {
+		ch <- prometheus.MustNewConstMetric(
+			jobStates,
+			prometheus.GaugeValue,
+			1,
+			job.Name,
+			jobState(job),
+		)
+	}
 }
 
 func boolToFloat64(b bool) float64 {
@@ -89,4 +114,15 @@ func boolToFloat64(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+func jobState(job managedupgradev1beta1.UpgradeJob) string {
+	if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded) {
+		return "succeeded"
+	} else if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed) {
+		return "failed"
+	} else if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted) {
+		return "active"
+	}
+	return "pending"
 }

@@ -44,6 +44,16 @@ type UpgradeConfigReconciler struct {
 // Reconcile implements the reconcile loop for UpgradeConfig.
 // It schedules UpgradeJobs based on the UpgradeConfig's schedule - if an update is available.
 func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	ret, err := r.reconcile(ctx, req)
+	if err != nil || ret.RequeueAfter > 0 || ret.Requeue {
+		return ret, err
+	}
+
+	// ensure we always requeue after a minute, if no requeue set, so we don't miss the next run on some corner cases
+	return ctrl.Result{RequeueAfter: time.Minute}, nil
+}
+
+func (r *UpgradeConfigReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := log.FromContext(ctx).WithName("UpgradeConfigReconciler.Reconcile")
 	l.Info("Reconciling UpgradeConfig")
 
@@ -158,8 +168,10 @@ func (r *UpgradeConfigReconciler) setLastScheduledUpgrade(ctx context.Context, u
 func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConfig, latestUpdate configv1.Release, nextRun time.Time, ctx context.Context) error {
 	newJob := managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      uc.Name + "-" + strings.ReplaceAll(latestUpdate.Version, ".", "-") + "-" + strconv.FormatInt(nextRun.Unix(), 10),
-			Namespace: uc.Namespace,
+			Name:        uc.Name + "-" + strings.ReplaceAll(latestUpdate.Version, ".", "-") + "-" + strconv.FormatInt(nextRun.Unix(), 10),
+			Namespace:   uc.Namespace,
+			Annotations: uc.Spec.JobTemplate.Metadata.GetAnnotations(),
+			Labels:      uc.Spec.JobTemplate.Metadata.GetLabels(),
 		},
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartAfter:  metav1.NewTime(nextRun),
@@ -189,6 +201,7 @@ func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConf
 func (r *UpgradeConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&managedupgradev1beta1.UpgradeConfig{}).
+		Owns(&managedupgradev1beta1.UpgradeJob{}).
 		Complete(r)
 }
 
