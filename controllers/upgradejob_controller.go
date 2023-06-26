@@ -438,7 +438,10 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 		}
 		if ok, upd := hook.Claim(uj); ok {
 			if upd {
-				return false, r.Status().Update(ctx, &hook)
+				l.Info("claimed hook", "hook", hook.Name)
+				if err := r.Status().Update(ctx, &hook); err != nil {
+					return false, err
+				}
 			}
 			hooks = append(hooks, hook)
 		}
