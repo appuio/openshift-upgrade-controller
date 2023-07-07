@@ -17,6 +17,10 @@ func SpecEqualIgnoringDesiredUpdate(a, b configv1.ClusterVersionSpec) (equal boo
 
 // IsVersionUpgradeCompleted returns whether the version upgrade in desired version is completed
 func IsVersionUpgradeCompleted(cv configv1.ClusterVersion) bool {
+	if cv.Spec.DesiredUpdate == nil {
+		return true
+	}
+
 	for _, version := range cv.Status.History {
 		if version.State == configv1.CompletedUpdate &&
 			version.Image == cv.Spec.DesiredUpdate.Image &&

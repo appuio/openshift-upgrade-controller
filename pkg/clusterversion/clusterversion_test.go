@@ -80,13 +80,12 @@ func TestIsVersionUpgradeCompleted(t *testing.T) {
 	desiredImg := "quay.io/openshift-release-dev/ocp-release@sha256:1234"
 	desiredVer := "4.5.23"
 
-	subject := configv1.ClusterVersion{
-		Spec: configv1.ClusterVersionSpec{
-			DesiredUpdate: &configv1.Update{
-				Image:   desiredImg,
-				Version: desiredVer,
-			},
-		},
+	subject := configv1.ClusterVersion{}
+	assert.True(t, clusterversion.IsVersionUpgradeCompleted(subject), "fresh install, desired update not set")
+
+	subject.Spec.DesiredUpdate = &configv1.Update{
+		Image:   desiredImg,
+		Version: desiredVer,
 	}
 	assert.False(t, clusterversion.IsVersionUpgradeCompleted(subject), "update not in history")
 
