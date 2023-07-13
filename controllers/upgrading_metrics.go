@@ -3,6 +3,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
@@ -36,7 +38,15 @@ var poolsUpgradingDesc = prometheus.NewDesc(
 var jobStates = prometheus.NewDesc(
 	MetricsNamespace+"_upgradejob_state",
 	"Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states.",
-	[]string{"upgradejob", "state"},
+	[]string{
+		"upgradejob",
+		"start_after",
+		"start_before",
+		"desired_version_force",
+		"desired_version_image",
+		"desired_version_version",
+		"state",
+	},
 	nil,
 )
 
@@ -104,6 +114,11 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 			prometheus.GaugeValue,
 			1,
 			job.Name,
+			job.Spec.StartAfter.UTC().Format(time.RFC3339),
+			job.Spec.StartBefore.UTC().Format(time.RFC3339),
+			strconv.FormatBool(job.Spec.DesiredVersion.Force),
+			job.Spec.DesiredVersion.Image,
+			job.Spec.DesiredVersion.Version,
 			jobState(job),
 		)
 	}

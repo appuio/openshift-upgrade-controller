@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	configv1 "github.com/openshift/api/config/v1"
@@ -54,6 +55,15 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 	pendingJob := &managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "pending",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartAfter:  metav1.Date(2020, 1, 20, 22, 0, 0, 0, time.FixedZone("Test", 60*60*2)),
+			StartBefore: metav1.Date(2020, 1, 20, 23, 0, 0, 0, time.FixedZone("Test", 60*60*2)),
+			DesiredVersion: configv1.Update{
+				Version: "4.11.23",
+				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:26f6d10b18",
+				Force:   true,
+			},
 		},
 	}
 	activeJob := &managedupgradev1beta1.UpgradeJob{
@@ -147,10 +157,10 @@ openshift_upgrade_controller_machine_config_pools_upgrading{pool="master"} %d
 openshift_upgrade_controller_machine_config_pools_upgrading{pool="worker"} %d
 # HELP openshift_upgrade_controller_upgradejob_state Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states.
 # TYPE openshift_upgrade_controller_upgradejob_state gauge
-openshift_upgrade_controller_upgradejob_state{state="failed",upgradejob="failed"} 1
-openshift_upgrade_controller_upgradejob_state{state="pending",upgradejob="pending"} 1
-openshift_upgrade_controller_upgradejob_state{state="active",upgradejob="active"} 1
-openshift_upgrade_controller_upgradejob_state{state="succeeded",upgradejob="succeeded"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="active",upgradejob="active"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="failed",upgradejob="failed"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="succeeded",upgradejob="succeeded"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="true",desired_version_image="quay.io/openshift-release-dev/ocp-release@sha256:26f6d10b18",desired_version_version="4.11.23",start_after="2020-01-20T20:00:00Z",start_before="2020-01-20T21:00:00Z",state="pending",upgradejob="pending"} 1
 `
 	return strings.NewReader(
 		fmt.Sprintf(metrics, b2i(upgrading), b2i(masterUpgrading), b2i(workerUpgrading)),
