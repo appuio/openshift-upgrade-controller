@@ -6,7 +6,8 @@
 package v1beta1
 
 import (
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/openshift/api/config/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -487,7 +488,11 @@ func (in *UpgradeJobSpec) DeepCopyInto(out *UpgradeJobSpec) {
 	*out = *in
 	in.StartAfter.DeepCopyInto(&out.StartAfter)
 	in.StartBefore.DeepCopyInto(&out.StartBefore)
-	out.DesiredVersion = in.DesiredVersion
+	if in.DesiredVersion != nil {
+		in, out := &in.DesiredVersion, &out.DesiredVersion
+		*out = new(v1.Update)
+		**out = **in
+	}
 	out.UpgradeJobConfig = in.UpgradeJobConfig
 }
 
@@ -506,7 +511,7 @@ func (in *UpgradeJobStatus) DeepCopyInto(out *UpgradeJobStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]v1.Condition, len(*in))
+		*out = make([]metav1.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

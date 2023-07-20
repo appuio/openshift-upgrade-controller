@@ -141,19 +141,14 @@ findNextRun:
 		return ctrl.Result{}, fmt.Errorf("could not get cluster version: %w", err)
 	}
 
-	latestUpdate := clusterversion.LatestAvailableUpdate(cv)
-	if latestUpdate == nil {
-		l.Info("no updates available")
-		return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
-	}
-
 	// Schedule is suspended, do nothing
 	if uc.Spec.Schedule.Suspend {
 		l.Info("would schedule job, but schedule is suspended")
 		return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
 	}
 
-	if err := r.createJob(uc, *latestUpdate, nextRun, ctx); err != nil {
+	latestUpdate := clusterversion.LatestAvailableUpdate(cv)
+	if err := r.createJob(uc, latestUpdate, nextRun, ctx); err != nil {
 		return ctrl.Result{}, fmt.Errorf("could not create job: %w", err)
 	}
 
@@ -165,10 +160,20 @@ func (r *UpgradeConfigReconciler) setLastScheduledUpgrade(ctx context.Context, u
 	return r.Status().Update(ctx, uc)
 }
 
-func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConfig, latestUpdate configv1.Release, nextRun time.Time, ctx context.Context) error {
+func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConfig, latestUpdate *configv1.Release, nextRun time.Time, ctx context.Context) error {
+	var dv *configv1.Update
+	vn := "noop-"
+	if latestUpdate != nil {
+		dv = &configv1.Update{
+			Version: latestUpdate.Version,
+			Image:   latestUpdate.Image,
+		}
+		vn = strings.ReplaceAll(latestUpdate.Version, ".", "-") + "-"
+	}
+
 	newJob := managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        uc.Name + "-" + strings.ReplaceAll(latestUpdate.Version, ".", "-") + "-" + strconv.FormatInt(nextRun.Unix(), 10),
+			Name:        uc.Name + "-" + vn + strconv.FormatInt(nextRun.Unix(), 10),
 			Namespace:   uc.Namespace,
 			Annotations: uc.Spec.JobTemplate.Metadata.GetAnnotations(),
 			Labels:      uc.Spec.JobTemplate.Metadata.GetLabels(),
@@ -177,10 +182,7 @@ func (r *UpgradeConfigReconciler) createJob(uc managedupgradev1beta1.UpgradeConf
 			StartAfter:  metav1.NewTime(nextRun),
 			StartBefore: metav1.NewTime(nextRun.Add(uc.Spec.MaxUpgradeStartDelay.Duration)),
 
-			DesiredVersion: configv1.Update{
-				Version: latestUpdate.Version,
-				Image:   latestUpdate.Image,
-			},
+			DesiredVersion: dv,
 
 			UpgradeJobConfig: uc.Spec.JobTemplate.Spec.Config,
 		},
