@@ -51,8 +51,10 @@ type UpgradeJobSpec struct {
 	// If the upgrade job is not started before this time, it is considered failed.
 	StartBefore metav1.Time `json:"startBefore"`
 
-	// DesiredVersion defines the desired version to upgrade to
-	DesiredVersion configv1.Update `json:"desiredVersion"`
+	// DesiredVersion defines the desired version to upgrade to.
+	// Can be empty if the upgrade job was created when there was no new version available.
+	// +optional
+	DesiredVersion *configv1.Update `json:"desiredVersion,omitempty"`
 
 	// UpgradeJobConfig defines the configuration for the upgrade job
 	UpgradeJobConfig `json:"config"`

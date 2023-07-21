@@ -66,7 +66,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartBefore: metav1.NewTime(clock.Now().Add(10 * time.Hour)),
 			StartAfter:  metav1.NewTime(clock.Now().Add(time.Hour)),
-			DesiredVersion: configv1.Update{
+			DesiredVersion: &configv1.Update{
 				Version: "4.5.13",
 				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
 			},
@@ -282,6 +282,65 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	})
 }
 
+func Test_UpgradeJobReconciler_Reconcile_EmptyDesiredVersion(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-123123",
+			Namespace: "appuio-openshift-upgrade-controller",
+			Labels:    map[string]string{"test": "test"},
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
+		},
+	}
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notify",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			Run: managedupgradev1beta1.RunAll,
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventStart,
+				managedupgradev1beta1.EventUpgradeComplete,
+				managedupgradev1beta1.EventSuccess,
+				managedupgradev1beta1.EventFinish,
+			},
+		},
+	}
+
+	c := controllerClient(t, upgradeJob, upgradeJobHook,
+		&configv1.ClusterVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "version",
+			}})
+
+	subject := &UpgradeJobReconciler{
+		Client: c,
+		Scheme: c.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventStart, false)
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventUpgradeComplete, false)
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventSuccess, false)
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, false)
+}
+
 func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
 	ctx := context.Background()
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
@@ -367,7 +426,7 @@ func Test_UpgradeJobReconciler_Reconcile_HookJobContainerEnv(t *testing.T) {
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartBefore: metav1.NewTime(clock.Now().Add(-time.Hour)),
 			StartAfter:  metav1.NewTime(clock.Now().Add(-7 * time.Hour)),
-			DesiredVersion: configv1.Update{
+			DesiredVersion: &configv1.Update{
 				Version: "4.5.13",
 			},
 		},
@@ -607,7 +666,7 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartBefore: metav1.NewTime(clock.Now().Add(time.Hour)),
 			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
-			DesiredVersion: configv1.Update{
+			DesiredVersion: &configv1.Update{
 				Version: "4.5.13",
 				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
 			},
@@ -664,7 +723,7 @@ func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartBefore: metav1.NewTime(clock.Now().Add(3 * time.Hour)),
 			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
-			DesiredVersion: configv1.Update{
+			DesiredVersion: &configv1.Update{
 				Version: "4.5.13",
 			},
 			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
@@ -722,7 +781,7 @@ func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartBefore: metav1.NewTime(clock.Now().Add(3 * time.Hour)),
 			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
-			DesiredVersion: configv1.Update{
+			DesiredVersion: &configv1.Update{
 				Version: "4.5.13",
 			},
 			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
@@ -795,7 +854,7 @@ func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartBefore: metav1.NewTime(clock.Now().Add(3 * time.Hour)),
 			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
-			DesiredVersion: configv1.Update{
+			DesiredVersion: &configv1.Update{
 				Version: "4.5.13",
 			},
 			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{

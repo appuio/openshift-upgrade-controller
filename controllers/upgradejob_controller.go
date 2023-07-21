@@ -184,60 +184,62 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, nil
 	}
 
-	// Check if the desired version is already set
-	if version.Spec.DesiredUpdate == nil || *version.Spec.DesiredUpdate != uj.Spec.DesiredVersion {
-		update := clusterversion.FindAvailableUpdate(version, uj.Spec.DesiredVersion.Image, uj.Spec.DesiredVersion.Version)
-		if update == nil {
+	if uj.Spec.DesiredVersion != nil {
+		// Check if the desired version is already set
+		if version.Spec.DesiredUpdate == nil || *version.Spec.DesiredUpdate != *uj.Spec.DesiredVersion {
+			update := clusterversion.FindAvailableUpdate(version, uj.Spec.DesiredVersion.Image, uj.Spec.DesiredVersion.Version)
+			if update == nil {
+				r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+					Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
+					Status:  metav1.ConditionTrue,
+					Reason:  managedupgradev1beta1.UpgradeJobReasonUpgradeWithdrawn,
+					Message: fmt.Sprintf("Upgrade became unavailable: %s", uj.Spec.DesiredVersion.Version),
+				})
+				return ctrl.Result{}, r.Status().Update(ctx, uj)
+			}
+			// Start the upgrade
+			version.Spec.DesiredUpdate = uj.Spec.DesiredVersion
+			if err := r.Update(ctx, &version); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to update desired version in cluster version: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
+
+		// Check if the upgrade is done
+		upgradedCon := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted)
+		if upgradedCon == nil {
 			r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
-				Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
-				Status:  metav1.ConditionTrue,
-				Reason:  managedupgradev1beta1.UpgradeJobReasonUpgradeWithdrawn,
-				Message: fmt.Sprintf("Upgrade became unavailable: %s", uj.Spec.DesiredVersion.Version),
+				Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
+				Status:  metav1.ConditionFalse,
+				Reason:  managedupgradev1beta1.UpgradeJobReasonInProgress,
+				Message: "Upgrade in progress",
 			})
 			return ctrl.Result{}, r.Status().Update(ctx, uj)
 		}
-		// Start the upgrade
-		version.Spec.DesiredUpdate = &uj.Spec.DesiredVersion
-		if err := r.Update(ctx, &version); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to update desired version in cluster version: %w", err)
-		}
-		return ctrl.Result{}, nil
-	}
+		if upgradedCon.Status != metav1.ConditionTrue {
+			if !clusterversion.IsVersionUpgradeCompleted(version) {
+				l.Info("Upgrade still in progress")
+				return ctrl.Result{}, nil
+			}
 
-	// Check if the upgrade is done
-	upgradedCon := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted)
-	if upgradedCon == nil {
-		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
-			Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
-			Status:  metav1.ConditionFalse,
-			Reason:  managedupgradev1beta1.UpgradeJobReasonInProgress,
-			Message: "Upgrade in progress",
-		})
-		return ctrl.Result{}, r.Status().Update(ctx, uj)
-	}
-	if upgradedCon.Status != metav1.ConditionTrue {
-		if !clusterversion.IsVersionUpgradeCompleted(version) {
-			l.Info("Upgrade still in progress")
-			return ctrl.Result{}, nil
-		}
+			mcpl := machineconfigurationv1.MachineConfigPoolList{}
+			if err := r.List(ctx, &mcpl); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to list machine config pools: %w", err)
+			}
+			poolsUpdating := healthcheck.MachineConfigPoolsUpdating(mcpl)
+			if len(poolsUpdating) > 0 {
+				l.Info("Machine config pools still updating", "pools", poolsUpdating)
+				return ctrl.Result{}, nil
+			}
 
-		mcpl := machineconfigurationv1.MachineConfigPoolList{}
-		if err := r.List(ctx, &mcpl); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to list machine config pools: %w", err)
+			r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+				Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
+				Status:  metav1.ConditionTrue,
+				Reason:  managedupgradev1beta1.UpgradeJobReasonCompleted,
+				Message: "Upgrade completed",
+			})
+			return ctrl.Result{}, r.Status().Update(ctx, uj)
 		}
-		poolsUpdating := healthcheck.MachineConfigPoolsUpdating(mcpl)
-		if len(poolsUpdating) > 0 {
-			l.Info("Machine config pools still updating", "pools", poolsUpdating)
-			return ctrl.Result{}, nil
-		}
-
-		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
-			Type:    managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted,
-			Status:  metav1.ConditionTrue,
-			Reason:  managedupgradev1beta1.UpgradeJobReasonCompleted,
-			Message: "Upgrade completed",
-		})
-		return ctrl.Result{}, r.Status().Update(ctx, uj)
 	}
 
 	ok, err = r.runHealthCheck(ctx, uj, version,

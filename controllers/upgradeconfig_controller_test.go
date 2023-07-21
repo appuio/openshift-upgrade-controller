@@ -79,7 +79,10 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		require.NoError(t, err)
 
 		jobs := listJobs(t, client, upgradeConfig.Namespace)
-		require.Len(t, jobs, 0, "no upgrade available, no job should be scheduled")
+		require.Len(t, jobs, 1, "job with empty desired version should be created")
+		emptyJob := jobs[0]
+		require.Nil(t, emptyJob.Spec.DesiredVersion)
+		require.NoError(t, client.Delete(ctx, &emptyJob))
 		var uuc managedupgradev1beta1.UpgradeConfig
 		expectedStartAfter := clock.Now().Add(upgradeConfig.Spec.PinVersionWindow.Duration)
 		require.NoError(t, client.Get(ctx, types.NamespacedName{Name: upgradeConfig.Name, Namespace: upgradeConfig.Namespace}, &uuc))
@@ -134,7 +137,7 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		require.Equal(t, configv1.Update{
 			Version: ucv.Status.AvailableUpdates[0].Version,
 			Image:   ucv.Status.AvailableUpdates[0].Image,
-		}, job.Spec.DesiredVersion)
+		}, *job.Spec.DesiredVersion)
 	})
 
 	step(t, "there is a future job. do nothing", func(t *testing.T) {

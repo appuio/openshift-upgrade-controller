@@ -109,6 +109,10 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	for _, job := range jobs.Items {
+		v := job.Spec.DesiredVersion
+		if v == nil {
+			v = &configv1.Update{}
+		}
 		ch <- prometheus.MustNewConstMetric(
 			jobStates,
 			prometheus.GaugeValue,
@@ -116,9 +120,9 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 			job.Name,
 			job.Spec.StartAfter.UTC().Format(time.RFC3339),
 			job.Spec.StartBefore.UTC().Format(time.RFC3339),
-			strconv.FormatBool(job.Spec.DesiredVersion.Force),
-			job.Spec.DesiredVersion.Image,
-			job.Spec.DesiredVersion.Version,
+			strconv.FormatBool(v.Force),
+			v.Image,
+			v.Version,
 			jobState(job),
 		)
 	}

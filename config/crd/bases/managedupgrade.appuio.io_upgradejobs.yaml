@@ -87,7 +87,8 @@ spec:
                 type: object
               desiredVersion:
                 description: DesiredVersion defines the desired version to upgrade
-                  to
+                  to. Can be empty if the upgrade job was created when there was no
+                  new version available.
                 properties:
                   force:
                     description: force allows an administrator to update to an image
@@ -123,7 +124,6 @@ spec:
                 type: string
             required:
             - config
-            - desiredVersion
             - startAfter
             - startBefore
             type: object

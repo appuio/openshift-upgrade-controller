@@ -59,7 +59,7 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 		Spec: managedupgradev1beta1.UpgradeJobSpec{
 			StartAfter:  metav1.Date(2020, 1, 20, 22, 0, 0, 0, time.FixedZone("Test", 60*60*2)),
 			StartBefore: metav1.Date(2020, 1, 20, 23, 0, 0, 0, time.FixedZone("Test", 60*60*2)),
-			DesiredVersion: configv1.Update{
+			DesiredVersion: &configv1.Update{
 				Version: "4.11.23",
 				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:26f6d10b18",
 				Force:   true,
