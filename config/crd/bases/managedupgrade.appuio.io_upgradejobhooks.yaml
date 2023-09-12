@@ -34,6 +34,12 @@ spec:
           spec:
             description: UpgradeJobHookSpec defines the desired state of UpgradeJobHook
             properties:
+              disruptive:
+                description: Disruptive defines if the code run by the hook is potentially
+                  disruptive. Added to the job metrics and injected as an environment
+                  variable to all hooks matching the job. This is currently only informational,
+                  but can be used to make decisions in jobs. The default is `false`.
+                type: boolean
               events:
                 description: Events is the list of events to trigger the hook to be
                   executed. `Create`, `Start`, and `UpgradeComplete` are the events

@@ -449,11 +449,16 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 		}
 	}
 
+	var hasMatchingDisruptiveHook bool
+	for _, hook := range hooks {
+		hasMatchingDisruptiveHook = hasMatchingDisruptiveHook || hook.Spec.Disruptive
+	}
+
 	activeJobs := []string{}
 	errors := []error{}
 	failedJobs := []string{}
 	for _, hook := range hooks {
-		jobs, err := r.jobForUpgradeJobAndHook(ctx, uj, hook, event)
+		jobs, err := r.jobForUpgradeJobAndHook(ctx, uj, hook, event, hookJobMeta{MatchesDisruptiveHooks: hasMatchingDisruptiveHook})
 		if err != nil {
 			errors = append(errors, err)
 			continue
@@ -496,7 +501,17 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 	return true, nil
 }
 
-func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, hook managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent) ([]managedupgradev1beta1.HookJobTracker, error) {
+type hookJobMeta struct {
+	MatchesDisruptiveHooks bool `json:"matchesDisruptiveHooks"`
+}
+
+func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(
+	ctx context.Context,
+	uj *managedupgradev1beta1.UpgradeJob,
+	hook managedupgradev1beta1.UpgradeJobHook,
+	event managedupgradev1beta1.UpgradeEvent,
+	meta hookJobMeta,
+) ([]managedupgradev1beta1.HookJobTracker, error) {
 	var jobs batchv1.JobList
 	if err := r.List(ctx, &jobs, client.InNamespace(uj.Namespace), client.MatchingLabels(jobLabels(uj.Name, hook.Name, event))); err != nil {
 		return nil, err
@@ -518,7 +533,7 @@ func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(ctx context.Context, uj *
 		return jobStatus, nil
 	}
 
-	_, err := r.createHookJob(ctx, hook, uj, event)
+	_, err := r.createHookJob(ctx, hook, uj, event, meta)
 	return []managedupgradev1beta1.HookJobTracker{{
 		HookEvent:          string(event),
 		UpgradeJobHookName: hook.Name,
@@ -526,7 +541,13 @@ func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(ctx context.Context, uj *
 	}}, err
 }
 
-func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedupgradev1beta1.UpgradeJobHook, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent) (batchv1.Job, error) {
+func (r *UpgradeJobReconciler) createHookJob(
+	ctx context.Context,
+	hook managedupgradev1beta1.UpgradeJobHook,
+	uj *managedupgradev1beta1.UpgradeJob,
+	event managedupgradev1beta1.UpgradeEvent,
+	meta hookJobMeta,
+) (batchv1.Job, error) {
 	l := log.FromContext(ctx)
 	tmpl := hook.Spec.Template.DeepCopy()
 
@@ -543,13 +564,20 @@ func (r *UpgradeJobReconciler) createHookJob(ctx context.Context, hook managedup
 		return batchv1.Job{}, fmt.Errorf("failed to normalize upgrade job: %w", err)
 	}
 
+	normalizedMeta, err := normalizeAsJson(meta)
+	if err != nil {
+		return batchv1.Job{}, fmt.Errorf("failed to normalize hook job meta: %w", err)
+	}
+
 	evm := map[string]any{
 		"EVENT": normalizedEvent,
 		"JOB":   normalizedUJ,
+		"META":  normalizedMeta,
 	}
 
 	flattenInto("EVENT", normalizedEvent, evm)
 	flattenInto("JOB", normalizedUJ, evm)
+	flattenInto("META", normalizedMeta, evm)
 
 	envs := make([]corev1.EnvVar, 0, len(evm))
 	for k, v := range evm {

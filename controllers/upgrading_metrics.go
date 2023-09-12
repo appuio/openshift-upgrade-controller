@@ -10,8 +10,11 @@ import (
 	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
@@ -46,6 +49,7 @@ var jobStates = prometheus.NewDesc(
 		"desired_version_image",
 		"desired_version_version",
 		"state",
+		"matches_disruptive_hooks",
 	},
 	nil,
 )
@@ -106,6 +110,13 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 	var jobs managedupgradev1beta1.UpgradeJobList
 	if err := m.Client.List(ctx, &jobs); err != nil {
 		ch <- prometheus.NewInvalidMetric(jobStates, fmt.Errorf("failed to list upgrade jobs: %w", err))
+		return
+	}
+
+	var jobsHooks managedupgradev1beta1.UpgradeJobHookList
+	if err := m.Client.List(ctx, &jobsHooks); err != nil {
+		ch <- prometheus.NewInvalidMetric(jobStates, fmt.Errorf("failed to list upgrade job hooks: %w", err))
+		return
 	}
 
 	for _, job := range jobs.Items {
@@ -124,6 +135,7 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 			v.Image,
 			v.Version,
 			jobState(job),
+			strconv.FormatBool(jobHasMatchingDisruptiveHook(job, jobsHooks)),
 		)
 	}
 }
@@ -144,4 +156,22 @@ func jobState(job managedupgradev1beta1.UpgradeJob) string {
 		return "active"
 	}
 	return "pending"
+}
+
+func jobHasMatchingDisruptiveHook(job managedupgradev1beta1.UpgradeJob, hooks managedupgradev1beta1.UpgradeJobHookList) bool {
+	for _, hook := range hooks.Items {
+		sel, err := metav1.LabelSelectorAsSelector(&hook.Spec.Selector)
+		if err != nil {
+			log.Log.Error(err, "failed to parse hook selector")
+			continue
+		}
+		if !sel.Matches(labels.Set(job.Labels)) {
+			continue
+		}
+		if hook.WouldExecute(&job) && hook.Spec.Disruptive {
+			return true
+		}
+	}
+
+	return false
 }
