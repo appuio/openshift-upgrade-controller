@@ -70,6 +70,11 @@ type UpgradeJobHookSpec struct {
 	// More advanced failure policies can be handled through the upstream Job failure handling mechanisms.
 	// +kubebuilder:validation:Enum=Abort;Ignore
 	FailurePolicy string `json:"failurePolicy,omitempty"`
+	// Disruptive defines if the code run by the hook is potentially disruptive.
+	// Added to the job metrics and injected as an environment variable to all hooks matching the job.
+	// This is currently only informational, but can be used to make decisions in jobs.
+	// The default is `false`.
+	Disruptive bool `json:"disruptive,omitempty"`
 	// Selector is the label selector that determines which upgrade jobs the hook is executed for.
 	Selector metav1.LabelSelector `json:"selector,omitempty"`
 	// Template is the job template that is executed.
@@ -125,30 +130,41 @@ type UpgradeJobHook struct {
 }
 
 // Claim claims the hook for the given claimer.
-// Returns true if the hook was claimed, false if it was already claimed.
+// Returns true if the hook was claimed, or does not need to be claimed, false if it was already claimed.
 // Second return value is true if the hooks status was updated.
 func (u *UpgradeJobHook) Claim(claimer client.Object) (ok, updated bool) {
 	if u.Spec.GetRun() != RunNext {
 		return true, false
 	}
 
-	ref := ClaimReference{
-		APIVersion: claimer.GetObjectKind().GroupVersionKind().GroupVersion().String(),
-		Kind:       claimer.GetObjectKind().GroupVersionKind().Kind,
-		Name:       claimer.GetName(),
-		UID:        claimer.GetUID(),
-	}
-
+	ref := buildClaimReference(claimer)
 	if u.Status.ClaimedBy == ref {
 		return true, false
 	}
-
 	if u.Status.ClaimedBy == (ClaimReference{}) {
 		u.Status.ClaimedBy = ref
 		return true, true
 	}
 
 	return false, false
+}
+
+// WouldExecute returns true if the hook would be executed for the given claimer.
+func (u *UpgradeJobHook) WouldExecute(claimer client.Object) bool {
+	if u.Spec.GetRun() != RunNext {
+		return true
+	}
+
+	return u.Status.ClaimedBy == (ClaimReference{}) || u.Status.ClaimedBy == buildClaimReference(claimer)
+}
+
+func buildClaimReference(claimer client.Object) ClaimReference {
+	return ClaimReference{
+		APIVersion: claimer.GetObjectKind().GroupVersionKind().GroupVersion().String(),
+		Kind:       claimer.GetObjectKind().GroupVersionKind().Kind,
+		Name:       claimer.GetName(),
+		UID:        claimer.GetUID(),
+	}
 }
 
 //+kubebuilder:object:root=true

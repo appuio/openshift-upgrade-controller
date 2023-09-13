@@ -66,6 +66,72 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 			},
 		},
 	}
+	disruptiveJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "disruptive",
+			Labels: map[string]string{
+				"upgrade": "disruptive",
+			},
+		},
+	}
+	disruptiveJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: disruptiveJob.Name,
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: disruptiveJob.Labels,
+			},
+			Disruptive: true,
+		},
+	}
+	disruptiveUnclaimedNextJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "disruptive-unclaimed-next",
+			Labels: map[string]string{
+				"upgrade": "disruptive-unclaimed-next",
+			},
+		},
+	}
+	disruptiveUnclaimedNextJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: disruptiveUnclaimedNextJob.Name,
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: disruptiveUnclaimedNextJob.Labels,
+			},
+			Disruptive: true,
+			Run:        managedupgradev1beta1.RunNext,
+		},
+	}
+	disruptiveClaimedNextJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "disruptive-claimed-next",
+			Labels: map[string]string{
+				"upgrade": "disruptive-claimed-next",
+			},
+		},
+	}
+	disruptiveClaimedNextJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: disruptiveClaimedNextJob.Name,
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: disruptiveClaimedNextJob.Labels,
+			},
+			Disruptive: true,
+			Run:        managedupgradev1beta1.RunNext,
+		},
+		Status: managedupgradev1beta1.UpgradeJobHookStatus{
+			ClaimedBy: managedupgradev1beta1.ClaimReference{
+				APIVersion: "v1",
+				Kind:       "Pod",
+				Name:       "someone else",
+			},
+		},
+	}
 	activeJob := &managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "active",
@@ -111,7 +177,10 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 			},
 		},
 	}
-	c := controllerClient(t, version, masterPool, workerPool, pendingJob, activeJob, succeededJob, failedJob)
+	c := controllerClient(t, version, masterPool, workerPool, pendingJob, activeJob, succeededJob, failedJob,
+		disruptiveJob, disruptiveUnclaimedNextJob, disruptiveClaimedNextJob,
+		disruptiveJobHook, disruptiveUnclaimedNextJobHook, disruptiveClaimedNextJobHook,
+	)
 	subject := &ClusterUpgradingMetric{
 		Client: c,
 
@@ -157,10 +226,14 @@ openshift_upgrade_controller_machine_config_pools_upgrading{pool="master"} %d
 openshift_upgrade_controller_machine_config_pools_upgrading{pool="worker"} %d
 # HELP openshift_upgrade_controller_upgradejob_state Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states.
 # TYPE openshift_upgrade_controller_upgradejob_state gauge
-openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="active",upgradejob="active"} 1
-openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="failed",upgradejob="failed"} 1
-openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="succeeded",upgradejob="succeeded"} 1
-openshift_upgrade_controller_upgradejob_state{desired_version_force="true",desired_version_image="quay.io/openshift-release-dev/ocp-release@sha256:26f6d10b18",desired_version_version="4.11.23",start_after="2020-01-20T20:00:00Z",start_before="2020-01-20T21:00:00Z",state="pending",upgradejob="pending"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="active",upgradejob="active"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="failed",upgradejob="failed"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="succeeded",upgradejob="succeeded"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="true",desired_version_image="quay.io/openshift-release-dev/ocp-release@sha256:26f6d10b18",desired_version_version="4.11.23",matches_disruptive_hooks="false",start_after="2020-01-20T20:00:00Z",start_before="2020-01-20T21:00:00Z",state="pending",upgradejob="pending"} 1
+
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="true",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="pending",upgradejob="disruptive"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="true",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="pending",upgradejob="disruptive-unclaimed-next"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="pending",upgradejob="disruptive-claimed-next"} 1
 `
 	return strings.NewReader(
 		fmt.Sprintf(metrics, b2i(upgrading), b2i(masterUpgrading), b2i(workerUpgrading)),

@@ -516,7 +516,117 @@ func Test_UpgradeJobReconciler_Reconcile_HookJobContainerEnv(t *testing.T) {
 		requireEnv(t, c.Env, "JOB_status_conditions_0_type", matchStr("\"Started\""))
 		requireEnv(t, c.Env, "EVENT", isJsonObj)
 		requireEnv(t, c.Env, "EVENT_name", matchStr("\"Create\""))
+		requireEnv(t, c.Env, "META", isJsonObj)
+		requireEnv(t, c.Env, "META_matchesDisruptiveHooks", matchStr("false"))
 	}
+}
+
+func Test_UpgradeJobReconciler_Reconcile_Disruptive(t *testing.T) {
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+			Labels:    map[string]string{"test": "test"},
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{},
+		Status: managedupgradev1beta1.UpgradeJobStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:   managedupgradev1beta1.UpgradeJobConditionStarted,
+					Status: metav1.ConditionTrue,
+				},
+			},
+		},
+	}
+	disruptiveJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "disruptive",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			FailurePolicy: managedupgradev1beta1.FailurePolicyAbort,
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventCreate,
+			},
+			Disruptive: true,
+			Template: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name: "test",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	otherJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "other",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			FailurePolicy: managedupgradev1beta1.FailurePolicyAbort,
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventCreate,
+			},
+			Disruptive: false,
+			Template: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name: "test",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	c := controllerClient(t, upgradeJob, disruptiveJobHook, otherJobHook,
+		&configv1.ClusterVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "version",
+			}})
+
+	subject := &UpgradeJobReconciler{
+		Client: c,
+		Scheme: c.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	matchStr := func(str string) func(v string) (bool, error) {
+		return func(v string) (bool, error) {
+			return v == str, nil
+		}
+	}
+
+	job := checkAndCompleteHook(t, c, subject, upgradeJob, disruptiveJobHook, managedupgradev1beta1.EventCreate, true)
+	require.Equal(t, 1, len(job.Spec.Template.Spec.Containers))
+	requireEnv(t, job.Spec.Template.Spec.Containers[0].Env, "META_matchesDisruptiveHooks", matchStr("true"))
+
+	job = checkAndCompleteHook(t, c, subject, upgradeJob, otherJobHook, managedupgradev1beta1.EventCreate, true)
+	require.Equal(t, 1, len(job.Spec.Template.Spec.Containers))
+	requireEnv(t, job.Spec.Template.Spec.Containers[0].Env, "META_matchesDisruptiveHooks", matchStr("true"))
 }
 
 func Test_UpgradeJobReconciler_Reconcile_ClaimNextHook(t *testing.T) {
