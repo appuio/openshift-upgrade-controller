@@ -1095,6 +1095,10 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 	if fail {
 		ct = batchv1.JobFailed
 	}
+	expectedTrackedStatus := managedupgradev1beta1.HookJobTrackerStatusComplete
+	if fail {
+		expectedTrackedStatus = managedupgradev1beta1.HookJobTrackerStatusFailed
+	}
 
 	job := jobs.Items[0]
 	job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
@@ -1110,7 +1114,19 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 	var uj managedupgradev1beta1.UpgradeJob
 	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, &uj))
 	tracked := findTrackedHookJob(upgradeJobHook.Name, string(event), uj)
-	require.NotEmpty(t, tracked, "should have tracked hook job")
+	require.Len(t, tracked, 1, "should have tracked hook job")
+	require.Equal(t, expectedTrackedStatus, tracked[0].Status, "should track correct state")
+
+	// People might cleanup finished jobs or the TTL controller deletes them https://kubernetes.io/docs/concepts/workloads/controllers/ttlafterfinished/
+	// The controller should not fail in this case or try to recreate the job
+	require.NoError(t, c.Delete(ctx, &job))
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, &uj))
+	tracked = findTrackedHookJob(upgradeJobHook.Name, string(event), uj)
+	require.Len(t, tracked, 1, "should still have completed tracked hook job")
+	require.Equal(t, expectedTrackedStatus, tracked[0].Status, "should have kept the state")
+	require.NoError(t, c.List(ctx, &jobs, sel))
+	require.Lenf(t, jobs.Items, 0, "should not have recreated the deleted job")
 
 	return job
 }
