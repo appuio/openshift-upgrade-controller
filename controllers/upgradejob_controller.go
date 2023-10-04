@@ -730,8 +730,19 @@ func (r *UpgradeJobReconciler) trackHookJobs(ctx context.Context, req ctrl.Reque
 		tr = append(tr, s)
 	}
 
-	if !sets.New(uj.Status.HookJobTracker...).Equal(sets.New(tr...)) {
-		uj.Status.HookJobTracker = tr
+	currentAndCompleted := sets.New(tr...)
+	// Add already completed jobs that might have been deleted back.
+	for _, s := range uj.Status.HookJobTracker {
+		if s.Status != managedupgradev1beta1.HookJobTrackerStatusActive {
+			currentAndCompleted.Insert(s)
+		}
+	}
+
+	if !sets.New(uj.Status.HookJobTracker...).Equal(currentAndCompleted) {
+		uj.Status.HookJobTracker = currentAndCompleted.UnsortedList()
+		slices.SortFunc(uj.Status.HookJobTracker, func(a, b managedupgradev1beta1.HookJobTracker) int {
+			return strings.Compare(a.UpgradeJobHookName+a.HookEvent, b.UpgradeJobHookName+b.HookEvent)
+		})
 		if err := r.Status().Update(ctx, &uj); err != nil {
 			return err
 		}
