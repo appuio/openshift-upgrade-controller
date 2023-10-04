@@ -87,20 +87,24 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	if apimeta.IsStatusConditionTrue(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded) {
+	sc := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded)
+	if sc != nil && sc.Status == metav1.ConditionTrue {
 		// Ignore hooks status, they can't influence the upgrade anymore.
-		_, eserr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventSuccess)
-		_, eferr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish)
+		// Don't execute hooks created after the job was finished.
+		_, eserr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventSuccess, sc.LastTransitionTime.Time)
+		_, eferr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, sc.LastTransitionTime.Time)
 		return ctrl.Result{}, multierr.Combine(eserr, eferr, r.cleanupLock(ctx, &uj))
 	}
-	if apimeta.IsStatusConditionTrue(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed) {
+	fc := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
+	if fc != nil && fc.Status == metav1.ConditionTrue {
 		// Ignore hooks status, they can't influence the upgrade anymore.
-		_, efaerr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFailure)
-		_, efierr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish)
+		// Don't execute hooks created after the job was finished.
+		_, efaerr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFailure, fc.LastTransitionTime.Time)
+		_, efierr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, fc.LastTransitionTime.Time)
 		return ctrl.Result{}, multierr.Combine(efaerr, efierr, r.cleanupLock(ctx, &uj))
 	}
 
-	cont, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventCreate)
+	cont, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventCreate, time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -142,7 +146,7 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (ctrl.Result, error) {
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.reconcileStartedJob")
 
-	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart)
+	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart, time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -253,7 +257,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, nil
 	}
 
-	cont, err = r.executeHooks(ctx, uj, managedupgradev1beta1.EventUpgradeComplete)
+	cont, err = r.executeHooks(ctx, uj, managedupgradev1beta1.EventUpgradeComplete, time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -417,7 +421,7 @@ func (r *UpgradeJobReconciler) tryLockClusterVersion(ctx context.Context, versio
 	return nil
 }
 
-func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent) (bool, error) {
+func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent, cutoffTime time.Time) (bool, error) {
 	l := log.FromContext(ctx)
 
 	var allHooks managedupgradev1beta1.UpgradeJobHookList
@@ -428,6 +432,9 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 	hooks := make([]managedupgradev1beta1.UpgradeJobHook, 0, len(allHooks.Items))
 	for _, hook := range allHooks.Items {
 		if !slices.Contains(hook.Spec.Events, event) {
+			continue
+		}
+		if !cutoffTime.IsZero() && hook.CreationTimestamp.After(cutoffTime) {
 			continue
 		}
 		sel, err := metav1.LabelSelectorAsSelector(&hook.Spec.Selector)

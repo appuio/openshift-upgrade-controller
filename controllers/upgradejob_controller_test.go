@@ -279,6 +279,22 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	step(t, "`Success` and `Finish` hooks", func(t *testing.T) {
 		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventSuccess, true)
 		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, true)
+
+		clock.Advance(24 * time.Hour)
+
+		var jobs batchv1.JobList
+		require.NoError(t, c.List(ctx, &jobs))
+		prevJobs := len(jobs.Items)
+		upgradeJobHook2 := upgradeJobHook.DeepCopy()
+		upgradeJobHook2.ObjectMeta = metav1.ObjectMeta{
+			Name:              "notify2",
+			Namespace:         upgradeJobHook.Namespace,
+			CreationTimestamp: metav1.NewTime(clock.Now()),
+		}
+		require.NoError(t, c.Create(ctx, upgradeJobHook2))
+		reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+		require.NoError(t, c.List(ctx, &jobs))
+		require.Equal(t, prevJobs, len(jobs.Items), "should have not created new jobs for hooks created after the upgrade job finished")
 	})
 }
 
