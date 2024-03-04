@@ -7,7 +7,7 @@ require (
 	github.com/openshift/machine-config-operator v0.0.1-0.20230508173032-8f952d7fd139 // release-4.11
 	github.com/prometheus/client_golang v1.17.0
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	golang.org/x/mod v0.12.0
 	k8s.io/api v0.28.1
 	k8s.io/apimachinery v0.28.1
