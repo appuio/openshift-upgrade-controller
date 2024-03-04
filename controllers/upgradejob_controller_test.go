@@ -650,6 +650,10 @@ func Test_UpgradeJobReconciler_Reconcile_ClaimNextHook(t *testing.T) {
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: managedupgradev1beta1.GroupVersion.String(),
+			Kind:       "UpgradeJob",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "upgrade-1234-4-5-13",
 			Namespace: "appuio-openshift-upgrade-controller",

@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.13.0
+    controller-gen.kubebuilder.io/version: v0.14.0
   name: clusterversions.managedupgrade.appuio.io
 spec:
   group: managedupgrade.appuio.io
@@ -20,14 +20,19 @@ spec:
         description: ClusterVersion is the Schema for the clusterversions API
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
@@ -42,15 +47,16 @@ spec:
                     description: Spec is the spec applied to the ClusterVersion object
                     properties:
                       capabilities:
-                        description: capabilities configures the installation of optional,
-                          core cluster components.  A null value here is identical
-                          to an empty object; see the child properties for default
-                          semantics.
+                        description: |-
+                          capabilities configures the installation of optional, core
+                          cluster components.  A null value here is identical to an
+                          empty object; see the child properties for default semantics.
                         properties:
                           additionalEnabledCapabilities:
-                            description: additionalEnabledCapabilities extends the
-                              set of managed capabilities beyond the baseline defined
-                              in baselineCapabilitySet.  The default is an empty set.
+                            description: |-
+                              additionalEnabledCapabilities extends the set of managed
+                              capabilities beyond the baseline defined in
+                              baselineCapabilitySet.  The default is an empty set.
                             items:
                               description: ClusterVersionCapability enumerates optional,
                                 core cluster components.
@@ -66,11 +72,12 @@ spec:
                             type: array
                             x-kubernetes-list-type: atomic
                           baselineCapabilitySet:
-                            description: baselineCapabilitySet selects an initial
-                              set of optional capabilities to enable, which can be
-                              extended via additionalEnabledCapabilities.  If unset,
-                              the cluster will choose a default, and the default may
-                              change over time. The current default is vCurrent.
+                            description: |-
+                              baselineCapabilitySet selects an initial set of
+                              optional capabilities to enable, which can be extended via
+                              additionalEnabledCapabilities.  If unset, the cluster will
+                              choose a default, and the default may change over time.
+                              The current default is vCurrent.
                             enum:
                             - None
                             - v4.11
@@ -79,59 +86,63 @@ spec:
                             type: string
                         type: object
                       channel:
-                        description: channel is an identifier for explicitly requesting
-                          that a non-default set of updates be applied to this cluster.
-                          The default channel will be contain stable updates that
-                          are appropriate for production clusters.
+                        description: |-
+                          channel is an identifier for explicitly requesting that a non-default
+                          set of updates be applied to this cluster. The default channel will be
+                          contain stable updates that are appropriate for production clusters.
                         type: string
                       clusterID:
-                        description: clusterID uniquely identifies this cluster. This
-                          is expected to be an RFC4122 UUID value (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-                          in hexadecimal values). This is a required field.
+                        description: |-
+                          clusterID uniquely identifies this cluster. This is expected to be
+                          an RFC4122 UUID value (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx in
+                          hexadecimal values). This is a required field.
                         type: string
                       desiredUpdate:
-                        description: "desiredUpdate is an optional field that indicates
-                          the desired value of the cluster version. Setting this value
-                          will trigger an upgrade (if the current version does not
-                          match the desired version). The set of recommended update
-                          values is listed as part of available updates in status,
-                          and setting values outside that range may cause the upgrade
-                          to fail. You may specify the version field without setting
-                          image if an update exists with that version in the availableUpdates
-                          or history. \n If an upgrade fails the operator will halt
-                          and report status about the failing component. Setting the
-                          desired update value back to the previous version will cause
-                          a rollback to be attempted. Not all rollbacks will succeed."
+                        description: |-
+                          desiredUpdate is an optional field that indicates the desired value of
+                          the cluster version. Setting this value will trigger an upgrade (if
+                          the current version does not match the desired version). The set of
+                          recommended update values is listed as part of available updates in
+                          status, and setting values outside that range may cause the upgrade
+                          to fail. You may specify the version field without setting image if
+                          an update exists with that version in the availableUpdates or history.
+
+
+                          If an upgrade fails the operator will halt and report status
+                          about the failing component. Setting the desired update value back to
+                          the previous version will cause a rollback to be attempted. Not all
+                          rollbacks will succeed.
                         properties:
                           force:
-                            description: force allows an administrator to update to
-                              an image that has failed verification or upgradeable
-                              checks. This option should only be used when the authenticity
-                              of the provided image has been verified out of band
-                              because the provided image will run with full administrative
-                              access to the cluster. Do not use this flag with images
-                              that comes from unknown or potentially malicious sources.
+                            description: |-
+                              force allows an administrator to update to an image that has failed
+                              verification or upgradeable checks. This option should only
+                              be used when the authenticity of the provided image has been verified out
+                              of band because the provided image will run with full administrative access
+                              to the cluster. Do not use this flag with images that comes from unknown
+                              or potentially malicious sources.
                             type: boolean
                           image:
-                            description: image is a container image location that
-                              contains the update. When this field is part of spec,
-                              image is optional if version is specified and the availableUpdates
-                              field contains a matching version.
+                            description: |-
+                              image is a container image location that contains the update. When this
+                              field is part of spec, image is optional if version is specified and the
+                              availableUpdates field contains a matching version.
                             type: string
                           version:
-                            description: version is a semantic versioning identifying
-                              the update version. When this field is part of spec,
-                              version is optional if image is specified.
+                            description: |-
+                              version is a semantic versioning identifying the update version. When this
+                              field is part of spec, version is optional if image is specified.
                             type: string
                         type: object
                       overrides:
-                        description: overrides is list of overides for components
-                          that are managed by cluster version operator. Marking a
-                          component unmanaged will prevent the operator from creating
-                          or updating the object.
+                        description: |-
+                          overrides is list of overides for components that are managed by
+                          cluster version operator. Marking a component unmanaged will prevent
+                          the operator from creating or updating the object.
                         items:
-                          description: ComponentOverride allows overriding cluster
-                            version operator's behavior for a component.
+                          description: |-
+                            ComponentOverride allows overriding cluster version operator's behavior
+                            for a component.
                           properties:
                             group:
                               description: group identifies the API group that the
@@ -144,14 +155,15 @@ spec:
                               description: name is the component's name.
                               type: string
                             namespace:
-                              description: namespace is the component's namespace.
-                                If the resource is cluster scoped, the namespace should
-                                be empty.
+                              description: |-
+                                namespace is the component's namespace. If the resource is cluster
+                                scoped, the namespace should be empty.
                               type: string
                             unmanaged:
-                              description: 'unmanaged controls if cluster version
-                                operator should stop managing the resources in this
-                                cluster. Default: false'
+                              description: |-
+                                unmanaged controls if cluster version operator should stop managing the
+                                resources in this cluster.
+                                Default: false
                               type: boolean
                           required:
                           - group
@@ -162,9 +174,9 @@ spec:
                           type: object
                         type: array
                       upstream:
-                        description: upstream may be used to specify the preferred
-                          update server. By default it will use the appropriate update
-                          server for the cluster and region.
+                        description: |-
+                          upstream may be used to specify the preferred update server. By default
+                          it will use the appropriate update server for the cluster and region.
                         type: string
                     required:
                     - clusterID
