@@ -70,6 +70,9 @@ func Test_MachineConfigPoolsUpdating(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "x-storage",
 				},
+				Spec: machineconfigurationv1.MachineConfigPoolSpec{
+					Paused: true,
+				},
 				Status: machineconfigurationv1.MachineConfigPoolStatus{
 					MachineCount:        3,
 					UpdatedMachineCount: 0,
@@ -86,6 +89,7 @@ func Test_MachineConfigPoolsUpdating(t *testing.T) {
 				Updated: 2,
 			}, {
 				Name:    "x-storage",
+				Paused:  true,
 				Total:   3,
 				Updated: 0,
 			},
@@ -93,5 +97,5 @@ func Test_MachineConfigPoolsUpdating(t *testing.T) {
 		MachineConfigPoolsUpdating(subject),
 	)
 
-	require.Equal(t, "[master (2/3) x-storage (0/3)]", fmt.Sprint(MachineConfigPoolsUpdating(subject)))
+	require.Equal(t, "[master (2/3) x-storage [paused] (0/3)]", fmt.Sprint(MachineConfigPoolsUpdating(subject)))
 }

@@ -154,8 +154,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, nil
 	}
 
-	startedCond := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted)
-	if r.Clock.Now().After(startedCond.LastTransitionTime.Add(uj.Spec.UpgradeTimeout.Duration)) {
+	if r.timeSinceStartAfter(uj) > uj.Spec.UpgradeTimeout.Duration {
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
 			Status:  metav1.ConditionTrue,
@@ -175,6 +174,10 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	// Lock the cluster version to prevent other upgrade jobs from starting
 	if err := r.tryLockClusterVersion(ctx, &version, uj.Namespace+"/"+uj.Name); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to lock cluster version: %w", err)
+	}
+
+	if err := r.pauseUnpauseMachineConfigPools(ctx, uj); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to pause machine config pools: %w", err)
 	}
 
 	ok, err := r.runHealthCheck(ctx, uj, version,
@@ -230,7 +233,27 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 			if err := r.List(ctx, &mcpl); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to list machine config pools: %w", err)
 			}
-			poolsUpdating := healthcheck.MachineConfigPoolsUpdating(mcpl)
+			paused, poolsUpdating := filterPaused(healthcheck.MachineConfigPoolsUpdating(mcpl))
+			isUpdatingPools := len(poolsUpdating) > 0
+			isPaused := len(paused) > 0 && !isUpdatingPools
+
+			if r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+				Type:   managedupgradev1beta1.UpgradeJobConditionPaused,
+				Status: boolToStatus(isPaused),
+				Reason: managedupgradev1beta1.UpgradeJobReasonDelaySet,
+			}) {
+				return ctrl.Result{}, r.Status().Update(ctx, uj)
+			}
+			// If the upgrade is paused, we need to requeue at the next possible unpause time. We don't get an event when the pause is over.
+			if isPaused {
+				res := r.nextTimedReconcile(uj)
+				l.Info("Machine config pools paused", "pools", paused, "requeueAfter", res.RequeueAfter)
+				if res == (ctrl.Result{}) {
+					// returning an error also requeues the reconcile (with a backoff delay), so the job should not get stuck
+					return ctrl.Result{}, fmt.Errorf("job paused but no next reconcile time found")
+				}
+				return res, nil
+			}
 			if len(poolsUpdating) > 0 {
 				l.Info("Machine config pools still updating", "pools", poolsUpdating)
 				return ctrl.Result{}, nil
@@ -331,9 +354,9 @@ func upgradeJobNameFromLockedClusterVersion(cv configv1.ClusterVersion) (ok bool
 }
 
 // setStatusCondition is a wrapper for apimeta.SetStatusCondition that sets the LastTransitionTime to r.Clock.Now().
-func (r *UpgradeJobReconciler) setStatusCondition(conditions *[]metav1.Condition, newCondition metav1.Condition) {
+func (r *UpgradeJobReconciler) setStatusCondition(conditions *[]metav1.Condition, newCondition metav1.Condition) (changed bool) {
 	newCondition.LastTransitionTime = metav1.NewTime(r.Clock.Now())
-	apimeta.SetStatusCondition(conditions, newCondition)
+	return apimeta.SetStatusCondition(conditions, newCondition)
 }
 
 // runHealthCheck runs the health check for the given health check type and returns true if the health check is done.
@@ -807,4 +830,115 @@ func findTrackedHookJob(ujhookName, event string, uj managedupgradev1beta1.Upgra
 		}
 	}
 	return f
+}
+
+// pauseUnpauseMachineConfigPools pauses or unpauses the machine config pools that match the given selectors in .Spec.MachineConfigPools and have a delay set.
+// The decision to pause or unpause is based on `pool.DelayUpgrade.DelayMin` relative to the startAfter time of the upgrade job.
+// It sets a timeout condition and returns an error if the delay is expired.
+// It also returns an error if the machine config pools cannot be listed or updated.
+func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) error {
+	var controllerManagesPools bool
+	var controllerPausedPools bool
+	for _, pool := range uj.Spec.MachineConfigPools {
+		if pool.DelayUpgrade == (managedupgradev1beta1.UpgradeJobMachineConfigPoolDelayUpgradeSpec{}) {
+			continue
+		}
+		shouldPause := r.timeSinceStartAfter(uj) < pool.DelayUpgrade.DelayMin.Duration
+		sel, err := metav1.LabelSelectorAsSelector(pool.MatchLabels)
+		if err != nil {
+			return fmt.Errorf("failed to parse machine config pool selector: %w", err)
+		}
+		var mcpl machineconfigurationv1.MachineConfigPoolList
+		if err := r.List(ctx, &mcpl, &client.ListOptions{
+			LabelSelector: sel,
+		}); err != nil {
+			return fmt.Errorf("failed to list machine config pools %q: %w", pool.MatchLabels, err)
+		}
+		for _, mcp := range mcpl.Items {
+			controllerManagesPools = true
+			controllerPausedPools = controllerPausedPools || shouldPause
+			// optional delay expiry
+			if mcp.Spec.Paused && !shouldPause && pool.DelayUpgrade.DelayMax.Duration > 0 && r.timeSinceStartAfter(uj) >= pool.DelayUpgrade.DelayMax.Duration {
+				r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+					Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
+					Status:  metav1.ConditionTrue,
+					Reason:  managedupgradev1beta1.UpgradeJobReasonUnpausingPoolsExpired,
+					Message: fmt.Sprintf("unpausing of pool %q expired", mcp.Name),
+				})
+				// always return an error so the current reconcile is stopped and requeued
+				return multierr.Append(fmt.Errorf("unpausing of pool %q expired", mcp.Name), r.Status().Update(ctx, uj))
+			}
+			if mcp.Spec.Paused != shouldPause {
+				mcp.Spec.Paused = shouldPause
+				if err := r.Update(ctx, &mcp); err != nil {
+					return fmt.Errorf("failed to pause/unpause machine config pool %q: %w", mcp.Name, err)
+				}
+			}
+		}
+	}
+
+	reason := managedupgradev1beta1.UpgradeJobReasonNoManagedPools
+	if controllerManagesPools {
+		reason = managedupgradev1beta1.UpgradeJobReasonDelaySet
+	}
+	if r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+		Type:   managedupgradev1beta1.UpgradeJobConditionMachineConfigPoolsPaused,
+		Status: boolToStatus(controllerPausedPools),
+		Reason: reason,
+	}) {
+		return r.Status().Update(ctx, uj)
+	}
+
+	return nil
+}
+
+// filterPaused returns the paused and active pools from the given list of pools.
+func filterPaused(ps []healthcheck.UpdatingPool) (paused []healthcheck.UpdatingPool, active []healthcheck.UpdatingPool) {
+	paused = make([]healthcheck.UpdatingPool, 0, len(ps))
+	active = make([]healthcheck.UpdatingPool, 0, len(ps))
+
+	for _, p := range ps {
+		if p.Paused {
+			paused = append(paused, p)
+		} else {
+			active = append(active, p)
+		}
+	}
+	return
+}
+
+// timeSinceStartAfter returns the time since the startAfter time of the upgrade job.
+func (r *UpgradeJobReconciler) timeSinceStartAfter(uj *managedupgradev1beta1.UpgradeJob) time.Duration {
+	return r.Clock.Now().Sub(uj.Spec.StartAfter.Time)
+}
+
+// nextTimedReconcile returns a requeue result for the next possible time we need to reconcile the upgrade job.
+func (r *UpgradeJobReconciler) nextTimedReconcile(uj *managedupgradev1beta1.UpgradeJob) ctrl.Result {
+	now := r.Clock.Now()
+	var possibleTimes []time.Time
+	for _, v := range uj.Spec.MachineConfigPools {
+		possibleTimes = append(possibleTimes, uj.Spec.StartAfter.Add(v.DelayUpgrade.DelayMin.Duration))
+		possibleTimes = append(possibleTimes, uj.Spec.StartAfter.Add(v.DelayUpgrade.DelayMax.Duration))
+	}
+
+	slices.SortFunc(possibleTimes, func(a, b time.Time) int {
+		return int(a.Sub(b))
+	})
+
+	for _, t := range possibleTimes {
+		if now.After(t) {
+			continue
+		}
+		return ctrl.Result{Requeue: true, RequeueAfter: t.Sub(now)}
+	}
+
+	return ctrl.Result{}
+}
+
+// boolToStatus converts a bool to a metav1.ConditionStatus.
+func boolToStatus(b bool) metav1.ConditionStatus {
+	if b {
+		return metav1.ConditionTrue
+	}
+	return metav1.ConditionFalse
 }

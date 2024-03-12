@@ -21,6 +21,7 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 		"openshift_upgrade_controller_upgradejob_state",
 		"openshift_upgrade_controller_cluster_upgrading",
 		"openshift_upgrade_controller_machine_config_pools_upgrading",
+		"openshift_upgrade_controller_machine_config_pools_paused",
 	}
 
 	version := &configv1.ClusterVersion{
@@ -45,6 +46,30 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 	workerPool := &machineconfigurationv1.MachineConfigPool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "worker",
+		},
+		Status: machineconfigurationv1.MachineConfigPoolStatus{
+			MachineCount:        3,
+			UpdatedMachineCount: 3,
+		},
+	}
+	pausedPool1 := &machineconfigurationv1.MachineConfigPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "paused1",
+		},
+		Spec: machineconfigurationv1.MachineConfigPoolSpec{
+			Paused: true,
+		},
+		Status: machineconfigurationv1.MachineConfigPoolStatus{
+			MachineCount:        3,
+			UpdatedMachineCount: 0,
+		},
+	}
+	pausedPool2 := &machineconfigurationv1.MachineConfigPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "paused2",
+		},
+		Spec: machineconfigurationv1.MachineConfigPoolSpec{
+			Paused: true,
 		},
 		Status: machineconfigurationv1.MachineConfigPoolStatus{
 			MachineCount:        3,
@@ -145,6 +170,23 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 			},
 		},
 	}
+	pausedJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "paused",
+		},
+		Status: managedupgradev1beta1.UpgradeJobStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:   managedupgradev1beta1.UpgradeJobConditionStarted,
+					Status: metav1.ConditionTrue,
+				},
+				{
+					Type:   managedupgradev1beta1.UpgradeJobConditionPaused,
+					Status: metav1.ConditionTrue,
+				},
+			},
+		},
+	}
 	succeededJob := &managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "succeeded",
@@ -177,7 +219,8 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 			},
 		},
 	}
-	c := controllerClient(t, version, masterPool, workerPool, pendingJob, activeJob, succeededJob, failedJob,
+	c := controllerClient(t, version, masterPool, workerPool, pendingJob, activeJob, pausedJob, succeededJob, failedJob,
+		pausedPool1, pausedPool2,
 		disruptiveJob, disruptiveUnclaimedNextJob, disruptiveClaimedNextJob,
 		disruptiveJobHook, disruptiveUnclaimedNextJobHook, disruptiveClaimedNextJobHook,
 	)
@@ -220,14 +263,23 @@ func expectedMetrics(upgrading, masterUpgrading, workerUpgrading bool) io.Reader
 # HELP openshift_upgrade_controller_cluster_upgrading Set to 1 if the cluster is currently upgrading, 0 otherwise.
 # TYPE openshift_upgrade_controller_cluster_upgrading gauge
 openshift_upgrade_controller_cluster_upgrading %d
-# HELP openshift_upgrade_controller_machine_config_pools_upgrading Set to 1 if a machine config pool in the cluster is currently upgrading, 0 otherwise.
+# HELP openshift_upgrade_controller_machine_config_pools_paused Set to 1 if a machine config pool in the cluster is currently paused, 0 otherwise.
+# TYPE openshift_upgrade_controller_machine_config_pools_paused gauge
+openshift_upgrade_controller_machine_config_pools_paused{pool="master"} 0
+openshift_upgrade_controller_machine_config_pools_paused{pool="paused1"} 1
+openshift_upgrade_controller_machine_config_pools_paused{pool="paused2"} 1
+openshift_upgrade_controller_machine_config_pools_paused{pool="worker"} 0
+# HELP openshift_upgrade_controller_machine_config_pools_upgrading Set to 1 if a machine config pool in the cluster is currently upgrading, 0 otherwise. Paused pools are not considered upgrading.
 # TYPE openshift_upgrade_controller_machine_config_pools_upgrading gauge
 openshift_upgrade_controller_machine_config_pools_upgrading{pool="master"} %d
 openshift_upgrade_controller_machine_config_pools_upgrading{pool="worker"} %d
+openshift_upgrade_controller_machine_config_pools_upgrading{pool="paused1"} 0
+openshift_upgrade_controller_machine_config_pools_upgrading{pool="paused2"} 0
 # HELP openshift_upgrade_controller_upgradejob_state Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states.
 # TYPE openshift_upgrade_controller_upgradejob_state gauge
 openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="active",upgradejob="active"} 1
 openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="failed",upgradejob="failed"} 1
+openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="paused",upgradejob="paused"} 1
 openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="succeeded",upgradejob="succeeded"} 1
 openshift_upgrade_controller_upgradejob_state{desired_version_force="true",desired_version_image="quay.io/openshift-release-dev/ocp-release@sha256:26f6d10b18",desired_version_version="4.11.23",matches_disruptive_hooks="false",start_after="2020-01-20T20:00:00Z",start_before="2020-01-20T21:00:00Z",state="pending",upgradejob="pending"} 1
 
