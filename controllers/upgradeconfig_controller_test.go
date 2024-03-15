@@ -195,10 +195,12 @@ func listJobs(t *testing.T, c client.Client, namespace string) []managedupgradev
 	return jobs.Items
 }
 
-func reconcileNTimes(t *testing.T, subject reconcile.Reconciler, ctx context.Context, req reconcile.Request, n int) {
+func reconcileNTimes(t *testing.T, subject reconcile.Reconciler, ctx context.Context, req reconcile.Request, n int) (lastResult reconcile.Result) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		_, err := subject.Reconcile(ctx, req)
+		lr, err := subject.Reconcile(ctx, req)
 		require.NoError(t, err)
+		lastResult = lr
 	}
+	return
 }
