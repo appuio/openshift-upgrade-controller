@@ -917,9 +917,12 @@ func (r *UpgradeJobReconciler) nextTimedReconcile(uj *managedupgradev1beta1.Upgr
 	now := r.Clock.Now()
 	var possibleTimes []time.Time
 	for _, v := range uj.Spec.MachineConfigPools {
-		possibleTimes = append(possibleTimes, uj.Spec.StartAfter.Add(v.DelayUpgrade.DelayMin.Duration))
-		possibleTimes = append(possibleTimes, uj.Spec.StartAfter.Add(v.DelayUpgrade.DelayMax.Duration))
+		possibleTimes = append(possibleTimes,
+			uj.Spec.StartAfter.Add(v.DelayUpgrade.DelayMin.Duration),
+			uj.Spec.StartAfter.Add(v.DelayUpgrade.DelayMax.Duration),
+		)
 	}
+	possibleTimes = append(possibleTimes, uj.Spec.StartAfter.Add(uj.Spec.UpgradeTimeout.Duration))
 
 	slices.SortFunc(possibleTimes, func(a, b time.Time) int {
 		return int(a.Sub(b))
