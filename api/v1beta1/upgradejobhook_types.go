@@ -24,7 +24,8 @@ const (
 	EventCreate UpgradeEvent = "Create"
 	// EventStart is the event type for when a job is started.
 	EventStart UpgradeEvent = "Start"
-	// UpgradeCompleted is the event type for when the upgrade is completed and health checks have passed.
+	// UpgradeCompleted is the event type for when the upgrade is completed and health checks have passed,
+	// but before any paused MachineConfigPools are done upgrading.
 	EventUpgradeComplete UpgradeEvent = "UpgradeComplete"
 
 	// EventFinish is the event type for when a job is finished regardless of outcome.

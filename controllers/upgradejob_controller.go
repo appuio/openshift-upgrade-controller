@@ -233,29 +233,11 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 			if err := r.List(ctx, &mcpl); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to list machine config pools: %w", err)
 			}
+			// We're not yet done with the upgrade, wait for the initial pools to finish updating before marking the upgrade as completed.
+			// Paused pools are managed after the "Upgrade completed" event.
 			paused, poolsUpdating := filterPaused(healthcheck.MachineConfigPoolsUpdating(mcpl))
-			isUpdatingPools := len(poolsUpdating) > 0
-			isPaused := len(paused) > 0 && !isUpdatingPools
-
-			if r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
-				Type:   managedupgradev1beta1.UpgradeJobConditionPaused,
-				Status: boolToStatus(isPaused),
-				Reason: managedupgradev1beta1.UpgradeJobReasonDelaySet,
-			}) {
-				return ctrl.Result{}, r.Status().Update(ctx, uj)
-			}
-			// If the upgrade is paused, we need to requeue at the next possible unpause time. We don't get an event when the pause is over.
-			if isPaused {
-				res := r.nextTimedReconcile(uj)
-				l.Info("Machine config pools paused", "pools", paused, "requeueAfter", res.RequeueAfter)
-				if res == (ctrl.Result{}) {
-					// returning an error also requeues the reconcile (with a backoff delay), so the job should not get stuck
-					return ctrl.Result{}, fmt.Errorf("job manages paused pools but no next reconcile time found")
-				}
-				return res, nil
-			}
 			if len(poolsUpdating) > 0 {
-				l.Info("Machine config pools still updating", "pools", poolsUpdating)
+				l.Info("Waiting for initial pool upgrade", "pools", poolsUpdating, "paused_pools", paused)
 				return ctrl.Result{}, nil
 			}
 
@@ -285,6 +267,36 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, err
 	}
 	if !cont {
+		return ctrl.Result{}, nil
+	}
+
+	mcpl := machineconfigurationv1.MachineConfigPoolList{}
+	if err := r.List(ctx, &mcpl); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to list machine config pools: %w", err)
+	}
+	paused, poolsUpdating := filterPaused(healthcheck.MachineConfigPoolsUpdating(mcpl))
+	isUpdatingPools := len(poolsUpdating) > 0
+	isPaused := len(paused) > 0 && !isUpdatingPools
+
+	if r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+		Type:   managedupgradev1beta1.UpgradeJobConditionPaused,
+		Status: boolToStatus(isPaused),
+		Reason: managedupgradev1beta1.UpgradeJobReasonDelaySet,
+	}) {
+		return ctrl.Result{}, r.Status().Update(ctx, uj)
+	}
+	// If the upgrade is paused, we need to requeue at the next possible unpause time. We don't get an event when the pause is over.
+	if isPaused {
+		res := r.nextTimedReconcile(uj)
+		l.Info("Machine config pools paused", "pools", paused, "requeueAfter", res.RequeueAfter)
+		if res == (ctrl.Result{}) {
+			// returning an error also requeues the reconcile (with a backoff delay), so the job should not get stuck
+			return ctrl.Result{}, fmt.Errorf("job manages paused pools but no next reconcile time found")
+		}
+		return res, nil
+	}
+	if isUpdatingPools {
+		l.Info("Machine config pools still updating", "pools", poolsUpdating)
 		return ctrl.Result{}, nil
 	}
 

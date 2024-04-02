@@ -1047,6 +1047,16 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) 
 		},
 	}
 
+	masterPool := &machineconfigurationv1.MachineConfigPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "master",
+			Labels: map[string]string{"name": "master"},
+		},
+		Status: machineconfigurationv1.MachineConfigPoolStatus{
+			MachineCount:        3,
+			UpdatedMachineCount: 0,
+		},
+	}
 	storagePool := &machineconfigurationv1.MachineConfigPool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   "storage",
@@ -1095,7 +1105,7 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) 
 		},
 	}
 
-	client := controllerClient(t, ucv, upgradeJob, storagePool, workerPool)
+	client := controllerClient(t, ucv, upgradeJob, masterPool, storagePool, workerPool)
 
 	subject := &UpgradeJobReconciler{
 		Client: client,
@@ -1114,6 +1124,8 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) 
 	require.NotNil(t, pausedCond, "should have paused mcp upgrades")
 	require.Equal(t, metav1.ConditionTrue, pausedCond.Status)
 	// pools
+	require.NoError(t, client.Get(ctx, requestForObject(masterPool).NamespacedName, masterPool))
+	require.False(t, masterPool.Spec.Paused, "should not have paused master mcp, since it does not match the selector")
 	require.NoError(t, client.Get(ctx, requestForObject(workerPool).NamespacedName, workerPool))
 	require.True(t, workerPool.Spec.Paused, "should have paused worker mcp")
 	require.NoError(t, client.Get(ctx, requestForObject(storagePool).NamespacedName, storagePool))
@@ -1127,11 +1139,23 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) 
 		Image:   upgradeJob.Spec.DesiredVersion.Image,
 	})
 	require.NoError(t, client.Status().Update(ctx, ucv))
-
-	// check that job becomes paused after partial completion
-	lastResult := reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 5)
+	// master pool still upgrading
 	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 	requireJobNotInFinalState(t, *upgradeJob)
+	upgradeCompletedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted)
+	require.NotNil(t, upgradeCompletedCond)
+	require.Equal(t, metav1.ConditionFalse, upgradeCompletedCond.Status)
+	masterPool.Status.UpdatedMachineCount = masterPool.Status.MachineCount
+	require.NoError(t, client.Status().Update(ctx, masterPool))
+
+	// check that job becomes paused after partial completion
+	lastResult := reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 5)
+	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	requireJobNotInFinalState(t, *upgradeJob)
+	upgradeCompletedCond = apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted)
+	require.NotNil(t, upgradeCompletedCond)
+	require.Equal(t, metav1.ConditionTrue, upgradeCompletedCond.Status)
 	pausedCond = apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionPaused)
 	require.NotNil(t, pausedCond)
 	require.Equal(t, metav1.ConditionTrue, pausedCond.Status)
