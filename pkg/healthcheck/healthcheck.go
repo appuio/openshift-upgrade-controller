@@ -20,12 +20,17 @@ func IsOperatorDegraded(cv configv1.ClusterVersion) bool {
 // UpdatingPool represents a machine config pool that is currently updating
 type UpdatingPool struct {
 	Name           string
+	Paused         bool
 	Total, Updated int
 }
 
 // String returns a string representation of the updating pool
 func (p UpdatingPool) String() string {
-	return fmt.Sprintf("%s (%d/%d)", p.Name, p.Updated, p.Total)
+	paused := ""
+	if p.Paused {
+		paused = "[paused] "
+	}
+	return fmt.Sprintf("%s %s(%d/%d)", p.Name, paused, p.Updated, p.Total)
 }
 
 // MachineConfigPoolsUpdating returns a list of machine config pools that are currently updating
@@ -37,6 +42,7 @@ func MachineConfigPoolsUpdating(mcpl machineconfigurationv1.MachineConfigPoolLis
 		}
 		pools = append(pools, UpdatingPool{
 			Name:    mcp.Name,
+			Paused:  mcp.Spec.Paused,
 			Total:   int(mcp.Status.MachineCount),
 			Updated: int(mcp.Status.UpdatedMachineCount),
 		})

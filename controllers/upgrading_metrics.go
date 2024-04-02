@@ -33,7 +33,14 @@ var clusterUpgradingDesc = prometheus.NewDesc(
 
 var poolsUpgradingDesc = prometheus.NewDesc(
 	MetricsNamespace+"_machine_config_pools_upgrading",
-	"Set to 1 if a machine config pool in the cluster is currently upgrading, 0 otherwise.",
+	"Set to 1 if a machine config pool in the cluster is currently upgrading, 0 otherwise. Paused pools are not considered upgrading.",
+	[]string{"pool"},
+	nil,
+)
+
+var poolsPausedDesc = prometheus.NewDesc(
+	MetricsNamespace+"_machine_config_pools_paused",
+	"Set to 1 if a machine config pool in the cluster is currently paused, 0 otherwise.",
 	[]string{"pool"},
 	nil,
 )
@@ -68,6 +75,7 @@ var _ prometheus.Collector = &ClusterUpgradingMetric{}
 func (*ClusterUpgradingMetric) Describe(ch chan<- *prometheus.Desc) {
 	ch <- clusterUpgradingDesc
 	ch <- poolsUpgradingDesc
+	ch <- poolsPausedDesc
 	ch <- jobStates
 }
 
@@ -81,17 +89,27 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 		err := fmt.Errorf("failed to list machine config pools: %w", err)
 		ch <- prometheus.NewInvalidMetric(clusterUpgradingDesc, err)
 		ch <- prometheus.NewInvalidMetric(poolsUpgradingDesc, err)
+		ch <- prometheus.NewInvalidMetric(poolsPausedDesc, err)
 	}
 	poolsUpdating := healthcheck.MachineConfigPoolsUpdating(mcpl)
-	ps := sets.NewString()
+	pus := sets.NewString()
 	for _, p := range poolsUpdating {
-		ps.Insert(p.Name)
+		if p.Paused {
+			continue
+		}
+		pus.Insert(p.Name)
 	}
 	for _, mcp := range mcpl.Items {
 		ch <- prometheus.MustNewConstMetric(
 			poolsUpgradingDesc,
 			prometheus.GaugeValue,
-			boolToFloat64(ps.Has(mcp.Name)),
+			boolToFloat64(pus.Has(mcp.Name)),
+			mcp.Name,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			poolsPausedDesc,
+			prometheus.GaugeValue,
+			boolToFloat64(mcp.Spec.Paused),
 			mcp.Name,
 		)
 	}
@@ -103,7 +121,7 @@ func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(
 			clusterUpgradingDesc,
 			prometheus.GaugeValue,
-			boolToFloat64(!clusterversion.IsVersionUpgradeCompleted(cv) || len(poolsUpdating) > 0),
+			boolToFloat64(!clusterversion.IsVersionUpgradeCompleted(cv) || pus.Len() > 0),
 		)
 	}
 
@@ -152,6 +170,8 @@ func jobState(job managedupgradev1beta1.UpgradeJob) string {
 		return "succeeded"
 	} else if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed) {
 		return "failed"
+	} else if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionPaused) {
+		return "paused"
 	} else if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted) {
 		return "active"
 	}
