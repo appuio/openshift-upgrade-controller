@@ -250,7 +250,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 				l.Info("Machine config pools paused", "pools", paused, "requeueAfter", res.RequeueAfter)
 				if res == (ctrl.Result{}) {
 					// returning an error also requeues the reconcile (with a backoff delay), so the job should not get stuck
-					return ctrl.Result{}, fmt.Errorf("job paused but no next reconcile time found")
+					return ctrl.Result{}, fmt.Errorf("job manages paused pools but no next reconcile time found")
 				}
 				return res, nil
 			}
