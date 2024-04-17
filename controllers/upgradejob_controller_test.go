@@ -1289,6 +1289,109 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_UnpauseExpire(
 	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonUnpausingPoolsExpired, failedCond.Reason, "should set reason to unpausing pools expired")
 }
 
+// Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_EnsureUnpause tests that the upgrade job reconciler
+// will unpause machine config pools at the end of an upgrade even if they did not require any upgrades
+func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_EnsureUnpause(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+		Status: configv1.ClusterVersionStatus{
+			AvailableUpdates: []configv1.Release{
+				{Version: "4.5.13"},
+			},
+			Conditions: []configv1.ClusterOperatorStatusCondition{
+				{
+					Type:   configv1.OperatorDegraded,
+					Status: configv1.ConditionFalse,
+				},
+			},
+		},
+	}
+
+	workerPool := &machineconfigurationv1.MachineConfigPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "worker",
+			Labels: map[string]string{"name": "worker"},
+		},
+		Status: machineconfigurationv1.MachineConfigPoolStatus{
+			MachineCount:        3,
+			UpdatedMachineCount: 3,
+		},
+	}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(3 * time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Minute)),
+			DesiredVersion: &configv1.Update{
+				Version: "4.5.13",
+			},
+			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				UpgradeTimeout: metav1.Duration{Duration: 12 * time.Hour},
+				MachineConfigPools: []managedupgradev1beta1.UpgradeJobMachineConfigPoolSpec{
+					{
+						MatchLabels: &metav1.LabelSelector{
+							MatchLabels: map[string]string{"name": "worker"},
+						},
+						DelayUpgrade: managedupgradev1beta1.UpgradeJobMachineConfigPoolDelayUpgradeSpec{
+							DelayMin: metav1.Duration{Duration: 1 * time.Hour},
+							DelayMax: metav1.Duration{Duration: 2 * time.Hour},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob, workerPool)
+
+	subject := &UpgradeJobReconciler{
+		Client: client,
+		Scheme: client.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	t.Log("check that upgrade job is started and machine config pools are paused")
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 10)
+	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	startedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionStarted)
+	require.NotNil(t, startedCond, "should have started upgrade")
+	pausedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionMachineConfigPoolsPaused)
+	require.NotNil(t, pausedCond, "should have paused mcp upgrades")
+	require.Equal(t, metav1.ConditionTrue, pausedCond.Status)
+	require.NoError(t, client.Get(ctx, requestForObject(workerPool).NamespacedName, workerPool))
+	require.True(t, workerPool.Spec.Paused, "should have paused worker mcp")
+
+	t.Log("finish the upgrade")
+	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+	ucv.Status.History = append(ucv.Status.History, configv1.UpdateHistory{
+		State:   configv1.CompletedUpdate,
+		Version: upgradeJob.Spec.DesiredVersion.Version,
+		Image:   upgradeJob.Spec.DesiredVersion.Image,
+	})
+	require.NoError(t, client.Status().Update(ctx, ucv))
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 5)
+
+	t.Log("check that job is done and ensure machine config pools are unpaused")
+	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	succeededCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded)
+	require.NotNil(t, succeededCond)
+	require.Equal(t, metav1.ConditionTrue, succeededCond.Status)
+	require.NoError(t, client.Get(ctx, requestForObject(workerPool).NamespacedName, workerPool))
+	require.False(t, workerPool.Spec.Paused, "should have unpaused worker mcp for completed job")
+}
+
 func Test_JobFromClusterVersionHandler(t *testing.T) {
 	ucv := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{

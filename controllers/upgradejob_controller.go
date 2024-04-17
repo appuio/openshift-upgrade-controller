@@ -176,7 +176,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, fmt.Errorf("failed to lock cluster version: %w", err)
 	}
 
-	if err := r.pauseUnpauseMachineConfigPools(ctx, uj); err != nil {
+	if err := r.pauseUnpauseMachineConfigPools(ctx, uj, false); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to pause machine config pools: %w", err)
 	}
 
@@ -298,6 +298,11 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	if isUpdatingPools {
 		l.Info("Machine config pools still updating", "pools", poolsUpdating)
 		return ctrl.Result{}, nil
+	}
+
+	// Ensure pools that were paused but did not need an upgrade are unpaused
+	if err := r.pauseUnpauseMachineConfigPools(ctx, uj, true); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to ensure machine config pools are unpaused: %w", err)
 	}
 
 	// Set the upgrade as successful
@@ -846,16 +851,17 @@ func findTrackedHookJob(ujhookName, event string, uj managedupgradev1beta1.Upgra
 
 // pauseUnpauseMachineConfigPools pauses or unpauses the machine config pools that match the given selectors in .Spec.MachineConfigPools and have a delay set.
 // The decision to pause or unpause is based on `pool.DelayUpgrade.DelayMin` relative to the startAfter time of the upgrade job.
+// If ensureUnpause is true, it will unpause the pools even if the delay has not expired.
 // It sets a timeout condition and returns an error if the delay is expired.
 // It also returns an error if the machine config pools cannot be listed or updated.
-func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) error {
+func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, ensureUnpause bool) error {
 	var controllerManagesPools bool
 	var controllerPausedPools bool
 	for _, pool := range uj.Spec.MachineConfigPools {
 		if pool.DelayUpgrade == (managedupgradev1beta1.UpgradeJobMachineConfigPoolDelayUpgradeSpec{}) {
 			continue
 		}
-		shouldPause := r.timeSinceStartAfter(uj) < pool.DelayUpgrade.DelayMin.Duration
+		shouldPause := !ensureUnpause && r.timeSinceStartAfter(uj) < pool.DelayUpgrade.DelayMin.Duration
 		sel, err := metav1.LabelSelectorAsSelector(pool.MatchLabels)
 		if err != nil {
 			return fmt.Errorf("failed to parse machine config pool selector: %w", err)
