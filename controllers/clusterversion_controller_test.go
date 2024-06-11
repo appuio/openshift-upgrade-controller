@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"testing"
+	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,7 @@ import (
 )
 
 func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 	ctx := context.Background()
 
 	upstream := &configv1.ClusterVersion{
@@ -54,6 +56,24 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 					},
 				},
 			},
+			Overlays: []managedupgradev1beta1.ClusterVersionOverlayConfig{
+				{
+					From: metav1.NewTime(clock.Now().Add(150 * time.Minute)),
+					Overlay: managedupgradev1beta1.ClusterVersionOverlay{
+						Spec: managedupgradev1beta1.ConfigV1ClusterVersionSpec{
+							Channel: "stable-4.8",
+						},
+					},
+				},
+				{
+					From: metav1.NewTime(clock.Now().Add(time.Hour)),
+					Overlay: managedupgradev1beta1.ClusterVersionOverlay{
+						Spec: managedupgradev1beta1.ConfigV1ClusterVersionSpec{
+							Channel: "stable-4.7",
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -63,23 +83,65 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 		Client: client,
 		Scheme: client.Scheme(),
 
+		Clock: &clock,
+
 		ManagedUpstreamClusterVersionName: "version",
 		ManagedClusterVersionName:         "version",
 		ManagedClusterVersionNamespace:    "appuio-openshift-upgrade-controller",
 	}
 
-	_, err := subject.Reconcile(ctx, reconcile.Request{})
+	ret, err := subject.Reconcile(ctx, reconcile.Request{})
 	require.NoError(t, err)
+	require.Equal(t, reconcile.Result{Requeue: true, RequeueAfter: time.Hour}, ret, "should requeue when new overlay should be applied")
 
 	updatedUpstream := &configv1.ClusterVersion{}
-	err = client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream)
-	require.NoError(t, err)
+	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
 
 	require.Equal(t, upstream.Spec.DesiredUpdate, updatedUpstream.Spec.DesiredUpdate, "DesiredUpdate should not be managed")
 
 	managed.Spec.Template.Spec.DesiredUpdate = nil
 	updatedUpstream.Spec.DesiredUpdate = nil
 	require.Equal(t, managed.Spec.Template.Spec, updatedUpstream.Spec, "Spec should be updated to match managed template")
+
+	clock.Advance(ret.RequeueAfter)
+	ret2, err := subject.Reconcile(ctx, reconcile.Request{})
+	require.NoError(t, err)
+	require.Equal(t, reconcile.Result{Requeue: true, RequeueAfter: (150 * time.Minute) - ret.RequeueAfter}, ret2, "should requeue when new overlay should be applied")
+	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	managed.Spec.Template.Spec.Channel = "stable-4.7"
+	managed.Spec.Template.Spec.DesiredUpdate = nil
+	updatedUpstream.Spec.DesiredUpdate = nil
+	require.Equal(t, managed.Spec.Template.Spec, updatedUpstream.Spec, "should apply first overlay")
+
+	clock.Advance(12 * time.Minute)
+	ret3, err := subject.Reconcile(ctx, reconcile.Request{})
+	require.NoError(t, err)
+	require.Equal(t, reconcile.Result{Requeue: true, RequeueAfter: (150 * time.Minute) - (ret.RequeueAfter + 12*time.Minute)}, ret3, "should requeue when new overlay should be applied")
+	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	managed.Spec.Template.Spec.Channel = "stable-4.7"
+	managed.Spec.Template.Spec.DesiredUpdate = nil
+	updatedUpstream.Spec.DesiredUpdate = nil
+	require.Equal(t, managed.Spec.Template.Spec, updatedUpstream.Spec, "first overlay should stay applied")
+
+	clock.Advance(ret3.RequeueAfter)
+	ret4, err := subject.Reconcile(ctx, reconcile.Request{})
+	require.NoError(t, err)
+	require.Equal(t, reconcile.Result{}, ret4, "no more overlays to apply")
+	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	managed.Spec.Template.Spec.Channel = "stable-4.8"
+	managed.Spec.Template.Spec.DesiredUpdate = nil
+	updatedUpstream.Spec.DesiredUpdate = nil
+	require.Equal(t, managed.Spec.Template.Spec, updatedUpstream.Spec, "should apply second overlay")
+
+	clock.Advance(7 * time.Hour)
+	ret5, err := subject.Reconcile(ctx, reconcile.Request{})
+	require.NoError(t, err)
+	require.Equal(t, reconcile.Result{}, ret5, "no more overlays to apply")
+	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	managed.Spec.Template.Spec.Channel = "stable-4.8"
+	managed.Spec.Template.Spec.DesiredUpdate = nil
+	updatedUpstream.Spec.DesiredUpdate = nil
+	require.Equal(t, managed.Spec.Template.Spec, updatedUpstream.Spec, "second overlay should stay applied")
 }
 
 func Test_ClusterVersionReconciler_Filter(t *testing.T) {

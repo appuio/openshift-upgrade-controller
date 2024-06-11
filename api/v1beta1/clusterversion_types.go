@@ -12,6 +12,8 @@ type ClusterVersionSpec struct {
 
 	// Template is the template applied to the ClusterVersion object
 	Template ClusterVersionTemplate `json:"template,omitempty"`
+
+	Overlays []ClusterVersionOverlayConfig `json:"overlays,omitempty"`
 }
 
 // ClusterVersionStatus defines the observed state of ClusterVersion
@@ -20,6 +22,20 @@ type ClusterVersionStatus struct{}
 type ClusterVersionTemplate struct {
 	// Spec is the spec applied to the ClusterVersion object
 	Spec configv1.ClusterVersionSpec `json:"spec,omitempty"`
+}
+
+type ClusterVersionOverlayConfig struct {
+	// From is the time from which the overlay is applied.
+	// +kubebuilder:validation:Required
+	// +required
+	From metav1.Time `json:"from"`
+	// Overlay is the overlay applied to the base ClusterVersion object
+	Overlay ClusterVersionOverlay `json:"overlay"`
+}
+
+type ClusterVersionOverlay struct {
+	// Spec is the spec overlaid to the base ClusterVersion object
+	Spec ConfigV1ClusterVersionSpec `json:"spec,omitempty"`
 }
 
 //+kubebuilder:object:root=true

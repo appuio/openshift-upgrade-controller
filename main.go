@@ -127,6 +127,8 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 
+		Clock: realClock{},
+
 		ManagedUpstreamClusterVersionName: managedUpstreamClusterVersionName,
 		ManagedClusterVersionName:         managedClusterVersionName,
 		ManagedClusterVersionNamespace:    managedClusterVersionNamespace,

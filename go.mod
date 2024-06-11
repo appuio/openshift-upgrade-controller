@@ -20,6 +20,7 @@ require (
 )
 
 require (
+	dario.cat/mergo v1.0.0
 	github.com/Masterminds/semver/v3 v3.2.1
 	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8
