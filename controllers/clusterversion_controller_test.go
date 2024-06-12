@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
@@ -37,6 +38,20 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 		},
 	}
 
+	newBaseClusterVersionSpec := func() configv1.ClusterVersionSpec {
+		return configv1.ClusterVersionSpec{
+			ClusterID: "9b588658-9671-429c-a762-34106da5795f",
+			DesiredUpdate: &configv1.Update{
+				Version: "ignored",
+			},
+			Upstream: "https://api.openshift.com/api/upgrades_info/v1/graph",
+			Channel:  "stable-4.6",
+			Capabilities: &configv1.ClusterVersionCapabilitiesSpec{
+				BaselineCapabilitySet: "v4.6",
+			},
+		}
+	}
+
 	managed := &managedupgradev1beta1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "version",
@@ -44,17 +59,7 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 		},
 		Spec: managedupgradev1beta1.ClusterVersionSpec{
 			Template: managedupgradev1beta1.ClusterVersionTemplate{
-				Spec: configv1.ClusterVersionSpec{
-					ClusterID: "9b588658-9671-429c-a762-34106da5795f",
-					DesiredUpdate: &configv1.Update{
-						Version: "ignored",
-					},
-					Upstream: "https://api.openshift.com/api/upgrades_info/v1/graph",
-					Channel:  "stable-4.6",
-					Capabilities: &configv1.ClusterVersionCapabilitiesSpec{
-						BaselineCapabilitySet: "v4.6",
-					},
-				},
+				Spec: newBaseClusterVersionSpec(),
 			},
 			Overlays: []managedupgradev1beta1.ClusterVersionOverlayConfig{
 				{
@@ -77,11 +82,11 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 		},
 	}
 
-	client := controllerClient(t, upstream, managed)
+	cli := controllerClient(t, upstream, managed)
 
 	subject := &ClusterVersionReconciler{
-		Client: client,
-		Scheme: client.Scheme(),
+		Client: cli,
+		Scheme: cli.Scheme(),
 
 		Clock: &clock,
 
@@ -95,7 +100,7 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 	require.Equal(t, reconcile.Result{Requeue: true, RequeueAfter: time.Hour}, ret, "should requeue when new overlay should be applied")
 
 	updatedUpstream := &configv1.ClusterVersion{}
-	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
 
 	require.Equal(t, upstream.Spec.DesiredUpdate, updatedUpstream.Spec.DesiredUpdate, "DesiredUpdate should not be managed")
 
@@ -107,7 +112,9 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 	ret2, err := subject.Reconcile(ctx, reconcile.Request{})
 	require.NoError(t, err)
 	require.Equal(t, reconcile.Result{Requeue: true, RequeueAfter: (150 * time.Minute) - ret.RequeueAfter}, ret2, "should requeue when new overlay should be applied")
-	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(managed), managed))
+	require.Equal(t, managed.Status.OverlayApplied, managed.Spec.Overlays[1].From, "should update OverlayApplied")
 	managed.Spec.Template.Spec.Channel = "stable-4.7"
 	managed.Spec.Template.Spec.DesiredUpdate = nil
 	updatedUpstream.Spec.DesiredUpdate = nil
@@ -117,7 +124,9 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 	ret3, err := subject.Reconcile(ctx, reconcile.Request{})
 	require.NoError(t, err)
 	require.Equal(t, reconcile.Result{Requeue: true, RequeueAfter: (150 * time.Minute) - (ret.RequeueAfter + 12*time.Minute)}, ret3, "should requeue when new overlay should be applied")
-	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(managed), managed))
+	require.Equal(t, managed.Status.OverlayApplied, managed.Spec.Overlays[1].From, "should update OverlayApplied")
 	managed.Spec.Template.Spec.Channel = "stable-4.7"
 	managed.Spec.Template.Spec.DesiredUpdate = nil
 	updatedUpstream.Spec.DesiredUpdate = nil
@@ -127,7 +136,9 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 	ret4, err := subject.Reconcile(ctx, reconcile.Request{})
 	require.NoError(t, err)
 	require.Equal(t, reconcile.Result{}, ret4, "no more overlays to apply")
-	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(managed), managed))
+	require.Equal(t, managed.Status.OverlayApplied, managed.Spec.Overlays[0].From, "should update OverlayApplied")
 	managed.Spec.Template.Spec.Channel = "stable-4.8"
 	managed.Spec.Template.Spec.DesiredUpdate = nil
 	updatedUpstream.Spec.DesiredUpdate = nil
@@ -137,11 +148,26 @@ func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 	ret5, err := subject.Reconcile(ctx, reconcile.Request{})
 	require.NoError(t, err)
 	require.Equal(t, reconcile.Result{}, ret5, "no more overlays to apply")
-	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, types.NamespacedName{Name: "version"}, updatedUpstream))
+	require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(managed), managed))
+	require.Equal(t, managed.Status.OverlayApplied, managed.Spec.Overlays[0].From, "should update OverlayApplied")
 	managed.Spec.Template.Spec.Channel = "stable-4.8"
 	managed.Spec.Template.Spec.DesiredUpdate = nil
 	updatedUpstream.Spec.DesiredUpdate = nil
 	require.Equal(t, managed.Spec.Template.Spec, updatedUpstream.Spec, "second overlay should stay applied")
+
+	var expectedPreviews []managedupgradev1beta1.ClusterVersionStatusOverlays
+	for _, overlay := range managed.Spec.Overlays {
+		b := newBaseClusterVersionSpec()
+		b.Channel = overlay.Overlay.Spec.Channel
+		expectedPreviews = append(expectedPreviews, managedupgradev1beta1.ClusterVersionStatusOverlays{
+			From: overlay.From,
+			Preview: managedupgradev1beta1.ClusterVersionStatusPreview{
+				Spec: b,
+			},
+		})
+	}
+	require.Equal(t, expectedPreviews, managed.Status.Overlays, "should keep previews up-to-date")
 }
 
 func Test_ClusterVersionReconciler_Filter(t *testing.T) {

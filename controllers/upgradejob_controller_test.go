@@ -1457,6 +1457,7 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 			&managedupgradev1beta1.UpgradeConfig{},
 			&managedupgradev1beta1.UpgradeJob{},
 			&managedupgradev1beta1.UpgradeJobHook{},
+			&managedupgradev1beta1.ClusterVersion{},
 			&configv1.ClusterVersion{},
 			&batchv1.Job{},
 			&machineconfigurationv1.MachineConfigPool{},

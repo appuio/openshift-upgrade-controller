@@ -110,10 +110,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	metrics.Registry.MustRegister(&controllers.ClusterUpgradingMetric{
+	metrics.Registry.MustRegister(&controllers.UpgradeInformationCollector{
 		Client: mgr.GetClient(),
 
 		ManagedUpstreamClusterVersionName: managedUpstreamClusterVersionName,
+	})
+	metrics.Registry.MustRegister(&controllers.ClusterVersionCollector{
+		Client: mgr.GetClient(),
+
+		ManagedClusterVersionName:      managedClusterVersionName,
+		ManagedClusterVersionNamespace: managedClusterVersionNamespace,
 	})
 
 	if err = (&controllers.NodeReconciler{

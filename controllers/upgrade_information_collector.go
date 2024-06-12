@@ -61,18 +61,18 @@ var jobStates = prometheus.NewDesc(
 	nil,
 )
 
-// ClusterUpgradingMetric is a Prometheus collector that exposes the link between an organization and a billing entity.
-type ClusterUpgradingMetric struct {
+// UpgradeInformationCollector is a Prometheus collector that exposes various metrics about the upgrade process.
+type UpgradeInformationCollector struct {
 	client.Client
 
 	ManagedUpstreamClusterVersionName string
 }
 
-var _ prometheus.Collector = &ClusterUpgradingMetric{}
+var _ prometheus.Collector = &UpgradeInformationCollector{}
 
 // Describe implements prometheus.Collector.
 // Sends the static description of the metrics to the provided channel.
-func (*ClusterUpgradingMetric) Describe(ch chan<- *prometheus.Desc) {
+func (*UpgradeInformationCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- clusterUpgradingDesc
 	ch <- poolsUpgradingDesc
 	ch <- poolsPausedDesc
@@ -80,8 +80,9 @@ func (*ClusterUpgradingMetric) Describe(ch chan<- *prometheus.Desc) {
 }
 
 // Collect implements prometheus.Collector.
-// Sends a metric if the cluster is currently upgrading and a upgrading metric for each machine config pool.
-func (m *ClusterUpgradingMetric) Collect(ch chan<- prometheus.Metric) {
+// Sends a metric if the cluster is currently upgrading and an upgrading metric for each machine config pool.
+// It also collects job states and whether they have matching disruptive hooks.
+func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 	ctx := context.Background()
 
 	mcpl := machineconfigurationv1.MachineConfigPoolList{}

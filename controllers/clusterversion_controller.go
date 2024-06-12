@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"dario.cat/mergo"
@@ -62,9 +63,13 @@ func (r *ClusterVersionReconciler) Reconcile(ctx context.Context, _ ctrl.Request
 		return ctrl.Result{}, fmt.Errorf("failed to get upstream cluster version: %w", err)
 	}
 
-	overlaidSpec, err := applyOverlay(version.Spec.Template, version.Spec.Overlays, now)
+	usedOverlay, overlaidSpec, err := applyOverlay(version.Spec.Template, version.Spec.Overlays, now)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to apply overlay: %w", err)
+	}
+
+	if err := r.updateStatus(ctx, usedOverlay, overlaidSpec, &version); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update status: %w", err)
 	}
 
 	if clusterversion.SpecEqualIgnoringDesiredUpdate(overlaidSpec.Spec, upstreamVersion.Spec) {
@@ -106,28 +111,66 @@ func (r *ClusterVersionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func applyOverlay(base managedupgradev1beta1.ClusterVersionTemplate, overlays []managedupgradev1beta1.ClusterVersionOverlayConfig, now time.Time) (managedupgradev1beta1.ClusterVersionTemplate, error) {
+// updateStatus updates the status of the managed ClusterVersion object.
+// It sets the OverlayApplied field to the from timestamp of the last applied overlay.
+// It sets the Previews field to the preview of the ClusterVersion object after applying the overlays.
+func (r *ClusterVersionReconciler) updateStatus(ctx context.Context, usedOverlay *managedupgradev1beta1.ClusterVersionOverlayConfig, current managedupgradev1beta1.ClusterVersionTemplate, version *managedupgradev1beta1.ClusterVersion) error {
+	stat := managedupgradev1beta1.ClusterVersionStatus{
+		Current:  current.Spec,
+		Overlays: make([]managedupgradev1beta1.ClusterVersionStatusOverlays, 0, len(version.Spec.Overlays)),
+	}
+	if usedOverlay != nil {
+		stat.OverlayApplied = usedOverlay.From
+	}
+	for _, overlay := range version.Spec.Overlays {
+		b := version.Spec.Template.DeepCopy()
+		err := mergo.Merge(b, managedupgradev1beta1.ClusterVersionTemplate{Spec: configv1.ClusterVersionSpec(overlay.Overlay.Spec)}, mergo.WithOverride)
+		if err != nil {
+			return fmt.Errorf("failed to apply overlay for status: %w", err)
+		}
+		stat.Overlays = append(stat.Overlays, managedupgradev1beta1.ClusterVersionStatusOverlays{
+			From: overlay.From,
+			Preview: managedupgradev1beta1.ClusterVersionStatusPreview{
+				Spec: b.Spec,
+			},
+		})
+	}
+
+	if !reflect.DeepEqual(version.Status, stat) {
+		version.Status = stat
+		log.FromContext(ctx).Info("updating status")
+		if err := r.Status().Update(ctx, version); err != nil {
+			return fmt.Errorf("failed to update status: %w", err)
+		}
+	}
+	return nil
+}
+
+// applyOverlay applies a overlay to the base ClusterVersion object.
+// The overlay is selected based on the current time.
+// Returns the applied overlay and the new ClusterVersionTemplate object.
+func applyOverlay(base managedupgradev1beta1.ClusterVersionTemplate, overlays []managedupgradev1beta1.ClusterVersionOverlayConfig, now time.Time) (*managedupgradev1beta1.ClusterVersionOverlayConfig, managedupgradev1beta1.ClusterVersionTemplate, error) {
 	b := base.DeepCopy()
 	so := slices.Clone(overlays)
 	sortOverlaysByFrom(so)
 	slices.Reverse(so)
 
-	var o *managedupgradev1beta1.ClusterVersionOverlay
+	var o *managedupgradev1beta1.ClusterVersionOverlayConfig
 	for _, overlay := range so {
 		if now.Before(overlay.From.Time) {
 			continue
 		}
-		o = &overlay.Overlay
+		o = &overlay
 		break
 	}
 
 	if o == nil {
-		return *b, nil
+		return o, *b, nil
 	}
-	return *b, mergo.Merge(b, managedupgradev1beta1.ClusterVersionTemplate{Spec: configv1.ClusterVersionSpec(o.Spec)}, mergo.WithOverride)
+	return o, *b, mergo.Merge(b, managedupgradev1beta1.ClusterVersionTemplate{Spec: configv1.ClusterVersionSpec(o.Overlay.Spec)}, mergo.WithOverride)
 }
 
-// nextRequeue returns the time until the next overlay is applied.
+// nextRequeue returns a ctrl.Result with Requeue set to true and RequeueAfter set to the time of the next overlay if an overlay is scheduled in the future.
 func nextRequeue(version managedupgradev1beta1.ClusterVersion, now time.Time) ctrl.Result {
 	so := slices.Clone(version.Spec.Overlays)
 	sortOverlaysByFrom(so)
