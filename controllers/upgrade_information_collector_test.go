@@ -224,7 +224,7 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 		disruptiveJob, disruptiveUnclaimedNextJob, disruptiveClaimedNextJob,
 		disruptiveJobHook, disruptiveUnclaimedNextJobHook, disruptiveClaimedNextJobHook,
 	)
-	subject := &ClusterUpgradingMetric{
+	subject := &UpgradeInformationCollector{
 		Client: c,
 
 		ManagedUpstreamClusterVersionName: "version",
