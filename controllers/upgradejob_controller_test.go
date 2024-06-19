@@ -95,6 +95,30 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 			},
 		},
 	}
+	expiredSuspensionWindow := &managedupgradev1beta1.UpgradeSuspensionWindow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "expired-window",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeSuspensionWindowSpec{
+			Start: metav1.NewTime(clock.Now().Add(-7 * 24 * time.Hour)),
+			End:   metav1.NewTime(clock.Now().Add(-24 * time.Hour)),
+			JobSelector: &metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+		},
+	}
+	unrelatedSuspensionWindow := &managedupgradev1beta1.UpgradeSuspensionWindow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unrelated-window",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeSuspensionWindowSpec{
+			Start:          metav1.NewTime(clock.Now().Add(-7 * 24 * time.Hour)),
+			End:            metav1.NewTime(clock.Now().Add(7 * 24 * time.Hour)),
+			ConfigSelector: &metav1.LabelSelector{},
+		},
+	}
 
 	masterPool := &machineconfigurationv1.MachineConfigPool{
 		ObjectMeta: metav1.ObjectMeta{
@@ -106,7 +130,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		},
 	}
 
-	c := controllerClient(t, ucv, upgradeJob, upgradeJobHook, masterPool)
+	c := controllerClient(t, ucv, upgradeJob, upgradeJobHook, masterPool, expiredSuspensionWindow, unrelatedSuspensionWindow)
 
 	subject := &UpgradeJobReconciler{
 		Client: c,
@@ -295,6 +319,114 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
 		require.NoError(t, c.List(ctx, &jobs))
 		require.Equal(t, prevJobs, len(jobs.Items), "should have not created new jobs for hooks created after the upgrade job finished")
+	})
+}
+
+func Test_UpgradeJobReconciler_Reconcile_Skipped_Job(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+	}
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+			Labels: map[string]string{
+				"name": "upgrade-1234-4-5-13",
+			},
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(10 * time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(time.Hour)),
+			DesiredVersion: &configv1.Update{
+				Version: "4.5.13",
+				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
+			},
+			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				UpgradeTimeout: metav1.Duration{Duration: 12 * time.Hour},
+			},
+		},
+	}
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notify",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventFinish,
+				managedupgradev1beta1.EventSuccess,
+			},
+			Template: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name:  "test",
+									Image: "test",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	suspensionWindow := &managedupgradev1beta1.UpgradeSuspensionWindow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "holidays",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeSuspensionWindowSpec{
+			Start:  metav1.NewTime(clock.Now().Add(-time.Hour)),
+			End:    metav1.NewTime(clock.Now().Add(time.Hour)),
+			Reason: "End of year holidays",
+			JobSelector: &metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+		},
+	}
+
+	c := controllerClient(t, ucv, upgradeJob, upgradeJobHook, suspensionWindow)
+
+	subject := &UpgradeJobReconciler{
+		Client: c,
+		Scheme: c.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	step(t, "Upgrade Skipped because of window", func(t *testing.T) {
+		reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 10)
+		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+		sc := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded)
+		require.NotNil(t, sc)
+		require.Equal(t, managedupgradev1beta1.UpgradeJobReasonSkipped, sc.Reason)
+		require.Equal(t, metav1.ConditionTrue, sc.Status)
+		require.Contains(t, sc.Message, suspensionWindow.Name)
+		require.Contains(t, sc.Message, suspensionWindow.Spec.Reason)
+
+		require.NoError(t, c.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+		require.Empty(t, ucv.Spec.DesiredUpdate, "cluster version should not be updated")
+		require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "cluster version should not be locked")
+	})
+
+	step(t, "`Success` and `Finish` hooks", func(t *testing.T) {
+		for _, event := range []managedupgradev1beta1.UpgradeEvent{managedupgradev1beta1.EventSuccess, managedupgradev1beta1.EventFinish} {
+			job := checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, event, true)
+			require.Len(t, job.Spec.Template.Spec.Containers, 1)
+			requireEnv(t, job.Spec.Template.Spec.Containers[0].Env, "EVENT_reason", func(v string) (bool, error) { return v == `"Skipped"`, nil })
+		}
 	})
 }
 
@@ -1458,6 +1590,7 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 			&managedupgradev1beta1.UpgradeJob{},
 			&managedupgradev1beta1.UpgradeJobHook{},
 			&managedupgradev1beta1.ClusterVersion{},
+			&managedupgradev1beta1.UpgradeSuspensionWindow{},
 			&configv1.ClusterVersion{},
 			&batchv1.Job{},
 			&machineconfigurationv1.MachineConfigPool{},

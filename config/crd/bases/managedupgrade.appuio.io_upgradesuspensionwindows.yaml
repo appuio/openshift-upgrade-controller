@@ -1,0 +1,168 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: upgradesuspensionwindows.managedupgrade.appuio.io
+spec:
+  group: managedupgrade.appuio.io
+  names:
+    kind: UpgradeSuspensionWindow
+    listKind: UpgradeSuspensionWindowList
+    plural: upgradesuspensionwindows
+    singular: upgradesuspensionwindow
+  scope: Namespaced
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: UpgradeSuspensionWindow is the Schema for the upgradejobs API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: UpgradeSuspensionWindowSpec defines the desired state of
+              UpgradeSuspensionWindow
+            properties:
+              configSelector:
+                description: |-
+                  ConfigSelector is the selector for UpgradeConfigs to suspend upgrades for.
+                  An empty label selector matches all objects. A null label selector matches no objects.
+                  Matching UpgradeConfig objects won’t create UpgradeJob objects during the time window.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              end:
+                description: End is the time when the suspension window ends.
+                format: date-time
+                type: string
+              jobSelector:
+                description: |-
+                  JobSelector is the selector for UpgradeJobs to suspend upgrades for.
+                  An empty label selector matches all objects. A null label selector matches no objects.
+                  Matching UpgradeJob objects won’t start the upgrade during the time window.
+                  Skipped jobs will be marked as successful with reason skipped.
+                  Success and Finish hooks will be executed as normal.
+                  If the job was owned by a UpgradeConfig object, the object creates a new job with the current (possibly same) version in the next non-suspended time window.
+                  Already running jobs will be allowed to finish.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              reason:
+                type: string
+              start:
+                description: Start is the time when the suspension window starts.
+                format: date-time
+                type: string
+            required:
+            - end
+            - reason
+            - start
+            type: object
+          status:
+            description: UpgradeSuspensionWindowStatus defines the observed state
+              of UpgradeSuspensionWindow
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

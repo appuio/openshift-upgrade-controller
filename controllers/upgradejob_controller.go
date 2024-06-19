@@ -67,6 +67,9 @@ const (
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobhooks,verbs=get;list;watch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobhooks/status,verbs=get;update;patch
 
+//+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradesuspensionwindows,verbs=get;list;watch
+//+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradesuspensionwindows/status,verbs=get
+
 //+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=batch,resources=jobs/finalizers,verbs=update
 
@@ -91,20 +94,20 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if sc != nil && sc.Status == metav1.ConditionTrue {
 		// Ignore hooks status, they can't influence the upgrade anymore.
 		// Don't execute hooks created after the job was finished.
-		_, eserr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventSuccess, sc.LastTransitionTime.Time)
-		_, eferr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, sc.LastTransitionTime.Time)
+		_, eserr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventSuccess, sc.Reason, sc.LastTransitionTime.Time)
+		_, eferr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, sc.Reason, sc.LastTransitionTime.Time)
 		return ctrl.Result{}, multierr.Combine(eserr, eferr, r.cleanupLock(ctx, &uj))
 	}
 	fc := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
 	if fc != nil && fc.Status == metav1.ConditionTrue {
 		// Ignore hooks status, they can't influence the upgrade anymore.
 		// Don't execute hooks created after the job was finished.
-		_, efaerr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFailure, fc.LastTransitionTime.Time)
-		_, efierr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, fc.LastTransitionTime.Time)
+		_, efaerr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFailure, fc.Reason, fc.LastTransitionTime.Time)
+		_, efierr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, fc.Reason, fc.LastTransitionTime.Time)
 		return ctrl.Result{}, multierr.Combine(efaerr, efierr, r.cleanupLock(ctx, &uj))
 	}
 
-	cont, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventCreate, time.Time{})
+	cont, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventCreate, "", time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -117,6 +120,21 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	now := r.Clock.Now()
+
+	window, err := r.matchingUpgradeSuspensionWindow(ctx, uj, now)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to search for matching upgrade suspension window: %w", err)
+	}
+	if window != nil {
+		l.Info("Upgrade job skipped by UpgradeSuspensionWindow", "window", window.Name, "reason", window.Spec.Reason, "start", window.Spec.Start.Time, "end", window.Spec.End.Time)
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+			Type:    managedupgradev1beta1.UpgradeJobConditionSucceeded,
+			Status:  metav1.ConditionTrue,
+			Reason:  managedupgradev1beta1.UpgradeJobReasonSkipped,
+			Message: fmt.Sprintf("Upgrade job skipped by UpgradeSuspensionWindow %q, reason: %q", window.Name, window.Spec.Reason),
+		})
+		return ctrl.Result{}, r.Status().Update(ctx, &uj)
+	}
 
 	if now.After(uj.Spec.StartBefore.Time) {
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
@@ -146,7 +164,7 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (ctrl.Result, error) {
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.reconcileStartedJob")
 
-	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart, time.Time{})
+	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart, managedupgradev1beta1.UpgradeJobReasonStarted, time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -262,7 +280,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, nil
 	}
 
-	cont, err = r.executeHooks(ctx, uj, managedupgradev1beta1.EventUpgradeComplete, time.Time{})
+	cont, err = r.executeHooks(ctx, uj, managedupgradev1beta1.EventUpgradeComplete, managedupgradev1beta1.UpgradeJobReasonCompleted, time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -461,7 +479,7 @@ func (r *UpgradeJobReconciler) tryLockClusterVersion(ctx context.Context, versio
 	return nil
 }
 
-func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent, cutoffTime time.Time) (bool, error) {
+func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent, reason string, cutoffTime time.Time) (bool, error) {
 	l := log.FromContext(ctx)
 
 	var allHooks managedupgradev1beta1.UpgradeJobHookList
@@ -505,7 +523,7 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 	errors := []error{}
 	failedJobs := []string{}
 	for _, hook := range hooks {
-		jobs, err := r.jobForUpgradeJobAndHook(ctx, uj, hook, event, hookJobMeta{MatchesDisruptiveHooks: hasMatchingDisruptiveHook})
+		jobs, err := r.jobForUpgradeJobAndHook(ctx, uj, hook, event, reason, hookJobMeta{MatchesDisruptiveHooks: hasMatchingDisruptiveHook})
 		if err != nil {
 			errors = append(errors, err)
 			continue
@@ -557,6 +575,7 @@ func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(
 	uj *managedupgradev1beta1.UpgradeJob,
 	hook managedupgradev1beta1.UpgradeJobHook,
 	event managedupgradev1beta1.UpgradeEvent,
+	reason string,
 	meta hookJobMeta,
 ) ([]managedupgradev1beta1.HookJobTracker, error) {
 	var jobs batchv1.JobList
@@ -580,7 +599,7 @@ func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(
 		return jobStatus, nil
 	}
 
-	_, err := r.createHookJob(ctx, hook, uj, event, meta)
+	_, err := r.createHookJob(ctx, hook, uj, event, reason, meta)
 	return []managedupgradev1beta1.HookJobTracker{{
 		HookEvent:          string(event),
 		UpgradeJobHookName: hook.Name,
@@ -593,6 +612,7 @@ func (r *UpgradeJobReconciler) createHookJob(
 	hook managedupgradev1beta1.UpgradeJobHook,
 	uj *managedupgradev1beta1.UpgradeJob,
 	event managedupgradev1beta1.UpgradeEvent,
+	reason string,
 	meta hookJobMeta,
 ) (batchv1.Job, error) {
 	l := log.FromContext(ctx)
@@ -603,7 +623,8 @@ func (r *UpgradeJobReconciler) createHookJob(
 	maps.Copy(ll, jobLabels(uj.Name, hook.Name, event))
 
 	normalizedEvent := map[string]any{
-		"name": string(event),
+		"name":   string(event),
+		"reason": reason,
 	}
 
 	normalizedUJ, err := normalizeAsJson(uj)
@@ -962,4 +983,30 @@ func boolToStatus(b bool) metav1.ConditionStatus {
 		return metav1.ConditionTrue
 	}
 	return metav1.ConditionFalse
+}
+
+// matchingUpgradeSuspensionWindow returns the UpgradeSuspensionWindow that matches the UpgradeJob and time or nil if none matches.
+func (r *UpgradeJobReconciler) matchingUpgradeSuspensionWindow(ctx context.Context, uj managedupgradev1beta1.UpgradeJob, t time.Time) (*managedupgradev1beta1.UpgradeSuspensionWindow, error) {
+	l := log.FromContext(ctx)
+
+	var allWindows managedupgradev1beta1.UpgradeSuspensionWindowList
+	if err := r.List(ctx, &allWindows, client.InNamespace(uj.Namespace)); err != nil {
+		return nil, fmt.Errorf("failed to list hooks: %w", err)
+	}
+	for _, window := range allWindows.Items {
+		sel, err := metav1.LabelSelectorAsSelector(window.Spec.JobSelector)
+		if err != nil {
+			l.Error(err, "failed to parse selector from window", "window", window.Name, "selector", "jobSelector")
+			continue
+		}
+		if !sel.Matches(labels.Set(uj.Labels)) {
+			continue
+		}
+		if t.Before(window.Spec.Start.Time) || t.After(window.Spec.End.Time) {
+			continue
+		}
+		return &window, nil
+	}
+
+	return nil, nil
 }
