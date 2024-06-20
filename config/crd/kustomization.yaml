@@ -6,7 +6,7 @@ resources:
 - bases/managedupgrade.appuio.io_upgradejobs.yaml
 - bases/managedupgrade.appuio.io_upgradeconfigs.yaml
 - bases/managedupgrade.appuio.io_upgradejobhooks.yaml
-- bases/managedupgrade.appuio.io_upgradesuspensionwindow.yaml
+- bases/managedupgrade.appuio.io_upgradesuspensionwindows.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 patchesStrategicMerge:
