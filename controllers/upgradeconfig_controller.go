@@ -11,14 +11,21 @@ import (
 	"github.com/robfig/cron/v3"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
+)
+
+const (
+	EventReasonUpgradeConfigSuspended                   = "UpgradeConfigSuspended"
+	EventReasonUpgradeConfigSuspendedBySuspensionWindow = "UpgradeConfigSuspendedBySuspensionWindow"
 )
 
 type Clock interface {
@@ -28,7 +35,8 @@ type Clock interface {
 // UpgradeConfigReconciler reconciles a UpgradeConfig object
 type UpgradeConfigReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 
 	Clock Clock
 
@@ -40,6 +48,9 @@ type UpgradeConfigReconciler struct {
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradeconfigs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradeconfigs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradeconfigs/finalizers,verbs=update
+
+//+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradesuspensionwindows,verbs=get;list;watch
+//+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradesuspensionwindows/status,verbs=get
 
 // Reconcile implements the reconcile loop for UpgradeConfig.
 // It schedules UpgradeJobs based on the UpgradeConfig's schedule - if an update is available.
@@ -143,7 +154,18 @@ findNextRun:
 
 	// Schedule is suspended, do nothing
 	if uc.Spec.Schedule.Suspend {
-		l.Info("would schedule job, but schedule is suspended")
+		l.Info("would schedule job, but schedule is suspended by .spec.schedule.suspend")
+		r.Recorder.Event(&uc, "Normal", EventReasonUpgradeConfigSuspended, "Upgrade scheduling is suspended by .spec.schedule.suspend")
+		return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
+	}
+	// Check if we are in a suspension window
+	window, err := r.matchingUpgradeSuspensionWindow(ctx, uc, now)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("could not search matching upgrade suspension window: %w", err)
+	}
+	if window != nil {
+		l.Info("would schedule job, but schedule is suspended by UpgradeSuspensionWindow", "window", window.Name, "reason", window.Spec.Reason, "start", window.Spec.Start.Time, "end", window.Spec.End.Time)
+		r.Recorder.Eventf(&uc, "Normal", EventReasonUpgradeConfigSuspendedBySuspensionWindow, "Upgrade scheduling is suspended by UpgradeSuspensionWindow %s: %s", window.Name, window.Spec.Reason)
 		return ctrl.Result{}, r.setLastScheduledUpgrade(ctx, &uc, nextRun)
 	}
 
@@ -213,6 +235,32 @@ func (r *UpgradeConfigReconciler) getControlledJobs(ctx context.Context, uc mana
 		return nil, err
 	}
 	return filterControlledJobs(uc, jobs.Items), nil
+}
+
+// matchingUpgradeSuspensionWindow returns the UpgradeSuspensionWindow that matches the UpgradeConfig and time or nil if none matches.
+func (r *UpgradeConfigReconciler) matchingUpgradeSuspensionWindow(ctx context.Context, ucw managedupgradev1beta1.UpgradeConfig, t time.Time) (*managedupgradev1beta1.UpgradeSuspensionWindow, error) {
+	l := log.FromContext(ctx)
+
+	var allWindows managedupgradev1beta1.UpgradeSuspensionWindowList
+	if err := r.List(ctx, &allWindows, client.InNamespace(ucw.Namespace)); err != nil {
+		return nil, fmt.Errorf("failed to list hooks: %w", err)
+	}
+	for _, window := range allWindows.Items {
+		sel, err := metav1.LabelSelectorAsSelector(window.Spec.ConfigSelector)
+		if err != nil {
+			l.Error(err, "failed to parse selector from window", "window", window.Name, "selector", "configSelector")
+			continue
+		}
+		if !sel.Matches(labels.Set(ucw.Labels)) {
+			continue
+		}
+		if t.Before(window.Spec.Start.Time) || t.After(window.Spec.End.Time) {
+			continue
+		}
+		return &window, nil
+	}
+
+	return nil, nil
 }
 
 func latestScheduledJob(jobs []managedupgradev1beta1.UpgradeJob) *managedupgradev1beta1.UpgradeJob {

@@ -56,6 +56,7 @@ var eventsInfluencingOutcome = []UpgradeEvent{
 // UpgradeJobHookSpec defines the desired state of UpgradeJobHook
 type UpgradeJobHookSpec struct {
 	// Events is the list of events to trigger the hook to be executed.
+	// Events should be idempotent and not assume any prior events have been executed.
 	// `Create`, `Start`, and `UpgradeComplete` are the events that influence the outcome of the upgrade.
 	// `Finish`, `Success`, and `Failure` do not influence the outcome of the upgrade,
 	// Job completion will not be checked, they are only used for informational purposes.

@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -55,7 +57,32 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		},
 	}
 
-	client := controllerClient(t, ucv, upgradeConfig)
+	expiredSuspensionWindow := &managedupgradev1beta1.UpgradeSuspensionWindow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "expired-window",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeSuspensionWindowSpec{
+			Start: metav1.NewTime(clock.Now().Add(-7 * 24 * time.Hour)),
+			End:   metav1.NewTime(clock.Now().Add(-24 * time.Hour)),
+			JobSelector: &metav1.LabelSelector{
+				MatchLabels: upgradeConfig.Labels,
+			},
+		},
+	}
+	unrelatedSuspensionWindow := &managedupgradev1beta1.UpgradeSuspensionWindow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unrelated-window",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeSuspensionWindowSpec{
+			Start:       metav1.NewTime(clock.Now().Add(-24 * time.Hour)),
+			End:         metav1.NewTime(clock.Now().Add(90 * 24 * time.Hour)),
+			JobSelector: &metav1.LabelSelector{},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeConfig, expiredSuspensionWindow, unrelatedSuspensionWindow)
 
 	subject := &UpgradeConfigReconciler{
 		Client: client,
@@ -180,6 +207,136 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		jobs = listJobs(t, client, upgradeConfig.Namespace)
 		require.Len(t, jobs, 2)
 	})
+}
+
+func Test_UpgradeConfigReconciler_Reconcile_SuspendedByWindow(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.UTC)}
+	t.Log("Now: ", clock.Now())
+	require.Equal(t, 14, func() int { _, isoweek := clock.Now().ISOWeek(); return isoweek }())
+	require.Equal(t, time.Monday, clock.Now().Weekday())
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+		Spec: configv1.ClusterVersionSpec{
+			ClusterID: "9b588658-9671-429c-a762-34106da5795f",
+		},
+		Status: configv1.ClusterVersionStatus{
+			AvailableUpdates: []configv1.Release{
+				{
+					Version: "4.5.13",
+					Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
+				},
+			},
+		},
+	}
+
+	upgradeConfig := &managedupgradev1beta1.UpgradeConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "daily-maintenance",
+			Namespace:         "appuio-openshift-upgrade-controller",
+			CreationTimestamp: metav1.Time{Time: clock.Now().Add(-time.Hour)},
+		},
+		Spec: managedupgradev1beta1.UpgradeConfigSpec{
+			Schedule: managedupgradev1beta1.UpgradeConfigSchedule{
+				Cron:     "0 22 * * *", // At 22:00 every day
+				Location: "UTC",
+			},
+			PinVersionWindow:     metav1.Duration{Duration: time.Hour},
+			MaxSchedulingDelay:   metav1.Duration{Duration: time.Minute},
+			MaxUpgradeStartDelay: metav1.Duration{Duration: time.Hour},
+			JobTemplate: managedupgradev1beta1.UpgradeConfigJobTemplate{
+				Metadata: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "openshift-upgrade-controller"},
+				},
+			},
+		},
+	}
+
+	suspensionWindow := &managedupgradev1beta1.UpgradeSuspensionWindow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "suspension-window",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeSuspensionWindowSpec{
+			Start:          metav1.NewTime(clock.Now().Add(-time.Hour)),
+			End:            metav1.NewTime(clock.Now().Add(24 * time.Hour)),
+			ConfigSelector: &metav1.LabelSelector{},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeConfig, suspensionWindow)
+
+	recorder := record.NewFakeRecorder(5)
+	subject := &UpgradeConfigReconciler{
+		Client:   client,
+		Scheme:   client.Scheme(),
+		Recorder: recorder,
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	step(t, "not in job creation window", func(t *testing.T) {
+		res, err := subject.Reconcile(ctx, requestForObject(upgradeConfig))
+		require.NoError(t, err)
+		// 14 hours (08:00->22:00) - 1 hour (version pin window)
+		require.Equal(t, (14*time.Hour)-upgradeConfig.Spec.PinVersionWindow.Duration, res.RequeueAfter)
+		clock.Advance(res.RequeueAfter)
+	})
+
+	step(t, "suspended by window", func(t *testing.T) {
+		reconcileNTimes(t, subject, ctx, requestForObject(upgradeConfig), 3)
+		jobs := listJobs(t, client, upgradeConfig.Namespace)
+		require.Len(t, jobs, 0)
+		requireEventMatches(t, recorder, EventReasonUpgradeConfigSuspendedBySuspensionWindow, suspensionWindow.Name)
+	})
+
+	step(t, "window expired, create job", func(t *testing.T) {
+		clock.Advance(24 * time.Hour)
+
+		_, err := subject.Reconcile(ctx, requestForObject(upgradeConfig))
+		require.NoError(t, err)
+
+		jobs := listJobs(t, client, upgradeConfig.Namespace)
+		require.Len(t, jobs, 1)
+	})
+}
+
+// requireEventMatches asserts that an event with the given substrings is present in the recorder.
+// It consumes all events from the recorder.
+func requireEventMatches(t *testing.T, recorder *record.FakeRecorder, substrings ...string) {
+	t.Helper()
+
+	events := make([]string, 0, len(recorder.Events))
+	for end := false; !end; {
+		select {
+		case event := <-recorder.Events:
+			events = append(events, event)
+		default:
+			end = true
+		}
+	}
+
+	var matchingEvent string
+	for _, event := range events {
+		matches := true
+		for _, substr := range substrings {
+			if !strings.Contains(event, substr) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			matchingEvent = event
+			break
+		}
+	}
+
+	require.NotEmpty(t, matchingEvent, "no event matches %v, got %v", substrings, events)
 }
 
 // requireTimeEqual asserts that two times are equal, ignoring their timezones.

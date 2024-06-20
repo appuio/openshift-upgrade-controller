@@ -45,6 +45,8 @@ const (
 	UpgradeJobReasonStarted = "Started"
 	// UpgradeJobReasonSucceeded is used when a step of the upgrade job did succeed
 	UpgradeJobReasonSucceeded = "Succeeded"
+	// UpgradeJobReasonSkipped is used when the upgrade job was skipped due to a suspension window
+	UpgradeJobReasonSkipped = "Skipped"
 	// UpgradeJobReasonCompleted is used when a step of the upgrade job did succeed
 	UpgradeJobReasonCompleted = "Completed"
 	// UpgradeJobReasonInProgress is used when the pre health check was done

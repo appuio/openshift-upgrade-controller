@@ -142,3 +142,17 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - upgradesuspensionwindows
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - managedupgrade.appuio.io
+  resources:
+  - upgradesuspensionwindows/status
+  verbs:
+  - get
