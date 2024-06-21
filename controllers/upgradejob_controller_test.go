@@ -406,7 +406,14 @@ func Test_UpgradeJobReconciler_Reconcile_Skipped_Job(t *testing.T) {
 		ManagedUpstreamClusterVersionName: "version",
 	}
 
+	step(t, "startAfter not yet reached, should not skip job yet", func(t *testing.T) {
+		reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 10)
+		require.Nil(t, apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded))
+	})
+
 	step(t, "Upgrade Skipped because of window", func(t *testing.T) {
+		// Move to start after time
+		clock.Advance(time.Hour)
 		reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 10)
 		require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 		sc := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded)

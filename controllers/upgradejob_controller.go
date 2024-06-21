@@ -121,22 +121,15 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	now := r.Clock.Now()
 
-	window, err := r.matchingUpgradeSuspensionWindow(ctx, uj, now)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to search for matching upgrade suspension window: %w", err)
-	}
-	if window != nil {
-		l.Info("Upgrade job skipped by UpgradeSuspensionWindow", "window", window.Name, "reason", window.Spec.Reason, "start", window.Spec.Start.Time, "end", window.Spec.End.Time)
-		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
-			Type:    managedupgradev1beta1.UpgradeJobConditionSucceeded,
-			Status:  metav1.ConditionTrue,
-			Reason:  managedupgradev1beta1.UpgradeJobReasonSkipped,
-			Message: fmt.Sprintf("Upgrade job skipped by UpgradeSuspensionWindow %q, reason: %q", window.Name, window.Spec.Reason),
-		})
-		return ctrl.Result{}, r.Status().Update(ctx, &uj)
-	}
-
 	if now.After(uj.Spec.StartBefore.Time) {
+		skipped, err := r.checkAndMarkSkipped(ctx, uj, now)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if skipped {
+			return ctrl.Result{}, nil
+		}
+
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
 			Status:  metav1.ConditionTrue,
@@ -148,6 +141,14 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if !now.Before(uj.Spec.StartAfter.Time) {
+		skipped, err := r.checkAndMarkSkipped(ctx, uj, now)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if skipped {
+			return ctrl.Result{}, nil
+		}
+
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionStarted,
 			Status:  metav1.ConditionTrue,
@@ -1009,4 +1010,23 @@ func (r *UpgradeJobReconciler) matchingUpgradeSuspensionWindow(ctx context.Conte
 	}
 
 	return nil, nil
+}
+
+// checkAndMarkSkipped checks if the upgrade job should be skipped due to an UpgradeSuspensionWindow and marks it as skipped if necessary.
+func (r *UpgradeJobReconciler) checkAndMarkSkipped(ctx context.Context, uj managedupgradev1beta1.UpgradeJob, now time.Time) (skipped bool, err error) {
+	window, err := r.matchingUpgradeSuspensionWindow(ctx, uj, now)
+	if err != nil {
+		return true, fmt.Errorf("failed to search for matching upgrade suspension window: %w", err)
+	}
+	if window != nil {
+		log.FromContext(ctx).Info("Upgrade job skipped by UpgradeSuspensionWindow", "window", window.Name, "reason", window.Spec.Reason, "start", window.Spec.Start.Time, "end", window.Spec.End.Time)
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+			Type:    managedupgradev1beta1.UpgradeJobConditionSucceeded,
+			Status:  metav1.ConditionTrue,
+			Reason:  managedupgradev1beta1.UpgradeJobReasonSkipped,
+			Message: fmt.Sprintf("Upgrade job skipped by UpgradeSuspensionWindow %q, reason: %q", window.Name, window.Spec.Reason),
+		})
+		return true, r.Status().Update(ctx, &uj)
+	}
+	return false, nil
 }
