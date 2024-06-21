@@ -47,7 +47,7 @@ var poolsPausedDesc = prometheus.NewDesc(
 
 var jobStates = prometheus.NewDesc(
 	MetricsNamespace+"_upgradejob_state",
-	"Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states.",
+	"Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states. Final states may have a reason.",
 	[]string{
 		"upgradejob",
 		"start_after",
@@ -56,6 +56,7 @@ var jobStates = prometheus.NewDesc(
 		"desired_version_image",
 		"desired_version_version",
 		"state",
+		"reason",
 		"matches_disruptive_hooks",
 	},
 	nil,
@@ -154,6 +155,7 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 			v.Image,
 			v.Version,
 			jobState(job),
+			jobStateReason(job),
 			strconv.FormatBool(jobHasMatchingDisruptiveHook(job, jobsHooks)),
 		)
 	}
@@ -164,6 +166,20 @@ func boolToFloat64(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+// jobStateReason returns the reason for the current state of the job.
+// All final states should have a reason.
+func jobStateReason(job managedupgradev1beta1.UpgradeJob) string {
+	sc := apimeta.FindStatusCondition(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded)
+	if sc != nil && sc.Status == metav1.ConditionTrue {
+		return sc.Reason
+	}
+	sf := apimeta.FindStatusCondition(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
+	if sf != nil && sf.Status == metav1.ConditionTrue {
+		return sf.Reason
+	}
+	return ""
 }
 
 func jobState(job managedupgradev1beta1.UpgradeJob) string {
