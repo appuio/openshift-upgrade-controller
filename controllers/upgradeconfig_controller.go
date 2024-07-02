@@ -21,6 +21,7 @@ import (
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
+	"github.com/appuio/openshift-upgrade-controller/pkg/scheduleutils"
 )
 
 const (
@@ -287,7 +288,7 @@ func calcNextRun(earliest time.Time, sched cron.Schedule, schedISOWeek string) (
 	nextRun := sched.Next(earliest)
 	// if the next run is more than 1000 runs away, we assume that the cron schedule is invalid as a safe guard
 	for i := 0; i < 1000; i++ {
-		isoWeekOK, err := checkIsoWeek(nextRun, schedISOWeek)
+		isoWeekOK, err := scheduleutils.CheckIsoWeek(nextRun, schedISOWeek)
 		if err != nil {
 			return time.Time{}, err
 		}
@@ -297,26 +298,4 @@ func calcNextRun(earliest time.Time, sched cron.Schedule, schedISOWeek string) (
 		nextRun = sched.Next(nextRun)
 	}
 	return time.Time{}, fmt.Errorf("could not find next run, max time: %s", nextRun)
-}
-
-// checkIsoWeek checks if the given time is in the given iso week.
-// The iso week can be one of the following:
-// - "": every iso week
-// - "@even": every even iso week
-// - "@odd": every odd iso week
-// - "<N>": every iso week N
-func checkIsoWeek(t time.Time, schedISOWeek string) (bool, error) {
-	_, iw := t.ISOWeek()
-	switch schedISOWeek {
-	case "":
-		return true, nil
-	case "@even":
-		return iw%2 == 0, nil
-	case "@odd":
-		return iw%2 == 1, nil
-	case strconv.Itoa(iw):
-		return true, nil
-	default:
-		return false, fmt.Errorf("unknown iso week: %s", schedISOWeek)
-	}
 }
