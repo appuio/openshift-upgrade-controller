@@ -100,8 +100,8 @@ github.com/onsi/ginkgo/v2 v2.17.1 h1:V++EzdbhI4ZV4ev0UTIj0PzhzOcReJFyJaLjtSF55M8
 github.com/onsi/ginkgo/v2 v2.17.1/go.mod h1:llBI3WDLL9Z6taip6f33H76YcWtJv+7R3HigUjbIBOs=
 github.com/onsi/gomega v1.33.0 h1:snPCflnZrpMsy94p4lXVEkHo12lmPnc3vY5XBbreexE=
 github.com/onsi/gomega v1.33.0/go.mod h1:+925n5YtiFsLzzafLUHzVMBpvvRAzrydIBiSIxjX3wY=
-github.com/openshift/api v0.0.0-20230213134911-7ba313770556 h1:7W2fOhJicyEff24VaF7ASNzPtYvr+iSCVft4SIBAzaE=
-github.com/openshift/api v0.0.0-20230213134911-7ba313770556/go.mod h1:aQ6LDasvHMvHZXqLHnX2GRmnfTWCF/iIwz8EMTTIE9A=
+github.com/openshift/api v0.0.0-20240809153734-7f2da4ccc272 h1:gm1H8A8FA+xSol0YtQ4nSZUN9/5q/4pAE5NF36tKh2E=
+github.com/openshift/api v0.0.0-20240809153734-7f2da4ccc272/go.mod h1:OOh6Qopf21pSzqNVCB5gomomBXb8o5sGKZxG2KNpaXM=
 github.com/openshift/machine-config-operator v0.0.1-0.20230508173032-8f952d7fd139 h1:p3TcFJMyt3ohtmS0AXufStzMf4O4pyQ4aGmlaPZQUc8=
 github.com/openshift/machine-config-operator v0.0.1-0.20230508173032-8f952d7fd139/go.mod h1:9eRuG/8WREpSZ6+pHqYFxXRK4v+w0GAZaUGp/SUaUWs=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
