@@ -5,7 +5,7 @@ go 1.22.0
 toolchain go1.22.5
 
 require (
-	github.com/openshift/api v0.0.0-20230213134911-7ba313770556 // release-4.11
+	github.com/openshift/api v0.0.0-20240809153734-7f2da4ccc272 // release-4.11
 	github.com/openshift/machine-config-operator v0.0.1-0.20230508173032-8f952d7fd139 // release-4.11
 	github.com/prometheus/client_golang v1.19.1
 	github.com/robfig/cron/v3 v3.0.1
