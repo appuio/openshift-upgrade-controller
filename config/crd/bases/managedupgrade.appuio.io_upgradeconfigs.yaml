@@ -260,6 +260,23 @@ spec:
                   Also is increased when a job would have been created, but was not created due to the config being suspended.
                 format: date-time
                 type: string
+              nextPossibleSchedules:
+                description: NextPossibleSchedules is a list of the next possible
+                  schedules for an upgrade.
+                items:
+                  description: NextPossibleSchedule defines the next possible schedule
+                    for an upgrade
+                  properties:
+                    time:
+                      description: Time is the time of the next possible schedule
+                      format: date-time
+                      type: string
+                  required:
+                  - time
+                  type: object
+                type: array
+            required:
+            - nextPossibleSchedules
             type: object
         required:
         - spec
