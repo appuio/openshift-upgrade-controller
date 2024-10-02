@@ -262,6 +262,63 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 	)
 }
 
+func Test_UpgradeSuspensionWindowMetric(t *testing.T) {
+	expectedMetricNames := []string{
+		"openshift_upgrade_controller_upgradesuspensionwindow_info",
+		"openshift_upgrade_controller_upgradesuspensionwindow_start_timestamp_seconds",
+		"openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds",
+		"openshift_upgrade_controller_upgradesuspensionwindow_matching_config",
+	}
+
+	version := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+	}
+	usw := &managedupgradev1beta1.UpgradeSuspensionWindow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "mywindow",
+		},
+		Spec: managedupgradev1beta1.UpgradeSuspensionWindowSpec{
+			Start:  metav1.NewTime(time.Date(2022, 3, 1, 0, 0, 0, 0, time.UTC)),
+			End:    metav1.NewTime(time.Date(2022, 6, 1, 0, 0, 0, 0, time.UTC)),
+			Reason: "No moar upgrades",
+		},
+		Status: managedupgradev1beta1.UpgradeSuspensionWindowStatus{
+			MatchingConfigs: []managedupgradev1beta1.UpgradeSuspensionWindowStatusMatchingObject{
+				{Name: "matching1"},
+				{Name: "matching2"},
+			},
+		},
+	}
+	c := controllerClient(t, version, usw)
+	subject := &UpgradeInformationCollector{
+		Client: c,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	metrics := `
+# HELP openshift_upgrade_controller_upgradesuspensionwindow_info Information about the upgradesuspensionwindow object
+# TYPE openshift_upgrade_controller_upgradesuspensionwindow_info gauge
+openshift_upgrade_controller_upgradesuspensionwindow_info{reason="No moar upgrades",upgradesuspensionwindow="mywindow"} 1
+# HELP openshift_upgrade_controller_upgradesuspensionwindow_matching_config Matching UpgradeConfigs for the suspension window
+# TYPE openshift_upgrade_controller_upgradesuspensionwindow_matching_config gauge
+openshift_upgrade_controller_upgradesuspensionwindow_matching_config{config="matching1",upgradesuspensionwindow="mywindow"} 1
+openshift_upgrade_controller_upgradesuspensionwindow_matching_config{config="matching2",upgradesuspensionwindow="mywindow"} 1
+# HELP openshift_upgrade_controller_upgradesuspensionwindow_start_timestamp_seconds The value of the start field of the suspension window.
+# TYPE openshift_upgrade_controller_upgradesuspensionwindow_start_timestamp_seconds gauge
+openshift_upgrade_controller_upgradesuspensionwindow_start_timestamp_seconds{upgradesuspensionwindow="mywindow"} 1.6460928e+09
+# HELP openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds The value of the start field of the suspension window.
+# TYPE openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds gauge
+openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds{upgradesuspensionwindow="mywindow"} 1.6540416e+09
+`
+
+	require.NoError(t,
+		testutil.CollectAndCompare(subject, strings.NewReader(metrics), expectedMetricNames...),
+	)
+}
+
 func Test_UpgradeConfigMetric(t *testing.T) {
 	expectedMetricNames := []string{
 		"openshift_upgrade_controller_upgradeconfig_info",

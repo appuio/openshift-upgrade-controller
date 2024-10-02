@@ -92,6 +92,44 @@ var upgradeConfigInfoDesc = prometheus.NewDesc(
 	nil,
 )
 
+var upgradeSuspensionWindowInfoDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradesuspensionwindow_info",
+	"Information about the upgradesuspensionwindow object",
+	[]string{
+		"upgradesuspensionwindow",
+		"reason",
+	},
+	nil,
+)
+
+var upgradeSuspensionWindowStartDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradesuspensionwindow_start_timestamp_seconds",
+	"The value of the start field of the suspension window.",
+	[]string{
+		"upgradesuspensionwindow",
+	},
+	nil,
+)
+
+var upgradeSuspensionWindowEndDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradesuspensionwindow_end_timestamp_seconds",
+	"The value of the start field of the suspension window.",
+	[]string{
+		"upgradesuspensionwindow",
+	},
+	nil,
+)
+
+var upgradeSuspensionWindowMatchingConfigsDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradesuspensionwindow_matching_config",
+	"Matching UpgradeConfigs for the suspension window",
+	[]string{
+		"upgradesuspensionwindow",
+		"config",
+	},
+	nil,
+)
+
 var upgradeConfigNextPossibleScheduleDesc = prometheus.NewDesc(
 	MetricsNamespace+"_upgradeconfig_next_possible_schedule_timestamp_seconds",
 	"The value of the time field of the next possible schedule for an upgrade.",
@@ -123,6 +161,10 @@ func (*UpgradeInformationCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- jobStartBeforeDesc
 	ch <- upgradeConfigInfoDesc
 	ch <- upgradeConfigNextPossibleScheduleDesc
+	ch <- upgradeSuspensionWindowInfoDesc
+	ch <- upgradeSuspensionWindowStartDesc
+	ch <- upgradeSuspensionWindowEndDesc
+	ch <- upgradeSuspensionWindowMatchingConfigsDesc
 }
 
 // Collect implements prometheus.Collector.
@@ -170,6 +212,45 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 			prometheus.GaugeValue,
 			boolToFloat64(!clusterversion.IsVersionUpgradeCompleted(cv) || pus.Len() > 0),
 		)
+	}
+
+	var windows managedupgradev1beta1.UpgradeSuspensionWindowList
+	if err := m.Client.List(ctx, &windows); err != nil {
+		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowInfoDesc, fmt.Errorf("failed to list upgrade suspension windows: %w", err))
+		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowStartDesc, fmt.Errorf("failed to list upgrade suspension windows: %w", err))
+		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowEndDesc, fmt.Errorf("failed to list upgrade suspension windows: %w", err))
+		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowMatchingConfigsDesc, fmt.Errorf("failed to list upgrade suspension windows: %w", err))
+	} else {
+		for _, window := range windows.Items {
+			ch <- prometheus.MustNewConstMetric(
+				upgradeSuspensionWindowInfoDesc,
+				prometheus.GaugeValue,
+				1,
+				window.Name,
+				window.Spec.Reason,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				upgradeSuspensionWindowStartDesc,
+				prometheus.GaugeValue,
+				float64(window.Spec.Start.Time.Unix()),
+				window.Name,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				upgradeSuspensionWindowEndDesc,
+				prometheus.GaugeValue,
+				float64(window.Spec.End.Time.Unix()),
+				window.Name,
+			)
+			for _, config := range window.Status.MatchingConfigs {
+				ch <- prometheus.MustNewConstMetric(
+					upgradeSuspensionWindowMatchingConfigsDesc,
+					prometheus.GaugeValue,
+					1,
+					window.Name,
+					config.Name,
+				)
+			}
+		}
 	}
 
 	var configs managedupgradev1beta1.UpgradeConfigList
