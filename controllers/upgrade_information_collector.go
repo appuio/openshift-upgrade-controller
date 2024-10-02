@@ -45,7 +45,7 @@ var poolsPausedDesc = prometheus.NewDesc(
 	nil,
 )
 
-var jobStates = prometheus.NewDesc(
+var jobStateDesc = prometheus.NewDesc(
 	MetricsNamespace+"_upgradejob_state",
 	"Returns the state of jobs in the cluster. 'pending', 'active', 'succeeded', or 'failed' are possible states. Final states may have a reason.",
 	[]string{
@@ -58,6 +58,35 @@ var jobStates = prometheus.NewDesc(
 		"state",
 		"reason",
 		"matches_disruptive_hooks",
+	},
+	nil,
+)
+
+var jobStartAfterDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradejob_start_after_timestamp_seconds",
+	"The value of the startAfter field of the job.",
+	[]string{
+		"upgradejob",
+	},
+	nil,
+)
+
+var jobStartBeforeDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradejob_start_before_timestamp_seconds",
+	"The value of the startBefore field of the job.",
+	[]string{
+		"upgradejob",
+	},
+	nil,
+)
+
+var upgradeConfigNextPossibleScheduleDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradeconfig_next_possible_schedule_timestamp_seconds",
+	"The value of the time field of the next possible schedule for an upgrade.",
+	[]string{
+		"upgradeconfig",
+		"n",
+		"timestamp",
 	},
 	nil,
 )
@@ -77,7 +106,10 @@ func (*UpgradeInformationCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- clusterUpgradingDesc
 	ch <- poolsUpgradingDesc
 	ch <- poolsPausedDesc
-	ch <- jobStates
+	ch <- jobStateDesc
+	ch <- jobStartAfterDesc
+	ch <- jobStartBeforeDesc
+	ch <- upgradeConfigNextPossibleScheduleDesc
 }
 
 // Collect implements prometheus.Collector.
@@ -127,15 +159,37 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 	}
 
+	var configs managedupgradev1beta1.UpgradeConfigList
+	if err := m.Client.List(ctx, &configs); err != nil {
+		ch <- prometheus.NewInvalidMetric(upgradeConfigNextPossibleScheduleDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
+	} else {
+		for _, config := range configs.Items {
+			for i, nps := range config.Status.NextPossibleSchedules {
+				ch <- prometheus.MustNewConstMetric(
+					upgradeConfigNextPossibleScheduleDesc,
+					prometheus.GaugeValue,
+					float64(nps.Time.Unix()),
+					config.Name,
+					strconv.Itoa(i),
+					nps.Time.UTC().Format(time.RFC3339),
+				)
+			}
+		}
+	}
+
 	var jobs managedupgradev1beta1.UpgradeJobList
 	if err := m.Client.List(ctx, &jobs); err != nil {
-		ch <- prometheus.NewInvalidMetric(jobStates, fmt.Errorf("failed to list upgrade jobs: %w", err))
+		ch <- prometheus.NewInvalidMetric(jobStateDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
+		ch <- prometheus.NewInvalidMetric(jobStartAfterDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
+		ch <- prometheus.NewInvalidMetric(jobStartBeforeDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
 		return
 	}
 
 	var jobsHooks managedupgradev1beta1.UpgradeJobHookList
 	if err := m.Client.List(ctx, &jobsHooks); err != nil {
-		ch <- prometheus.NewInvalidMetric(jobStates, fmt.Errorf("failed to list upgrade job hooks: %w", err))
+		ch <- prometheus.NewInvalidMetric(jobStateDesc, fmt.Errorf("failed to list upgrade job hooks: %w", err))
+		ch <- prometheus.NewInvalidMetric(jobStartAfterDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
+		ch <- prometheus.NewInvalidMetric(jobStartBeforeDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
 		return
 	}
 
@@ -145,7 +199,7 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 			v = &configv1.Update{}
 		}
 		ch <- prometheus.MustNewConstMetric(
-			jobStates,
+			jobStateDesc,
 			prometheus.GaugeValue,
 			1,
 			job.Name,
@@ -157,6 +211,18 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 			jobState(job),
 			jobStateReason(job),
 			strconv.FormatBool(jobHasMatchingDisruptiveHook(job, jobsHooks)),
+		)
+		ch <- prometheus.MustNewConstMetric(
+			jobStartAfterDesc,
+			prometheus.GaugeValue,
+			float64(job.Spec.StartAfter.Unix()),
+			job.Name,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			jobStartBeforeDesc,
+			prometheus.GaugeValue,
+			float64(job.Spec.StartBefore.Unix()),
+			job.Name,
 		)
 	}
 }
