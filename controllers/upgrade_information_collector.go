@@ -80,6 +80,18 @@ var jobStartBeforeDesc = prometheus.NewDesc(
 	nil,
 )
 
+var upgradeConfigInfoDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradeconfig_info",
+	"Information about the upgradeconfig object",
+	[]string{
+		"upgradeconfig",
+		"cron",
+		"location",
+		"suspended",
+	},
+	nil,
+)
+
 var upgradeConfigNextPossibleScheduleDesc = prometheus.NewDesc(
 	MetricsNamespace+"_upgradeconfig_next_possible_schedule_timestamp_seconds",
 	"The value of the time field of the next possible schedule for an upgrade.",
@@ -109,6 +121,7 @@ func (*UpgradeInformationCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- jobStateDesc
 	ch <- jobStartAfterDesc
 	ch <- jobStartBeforeDesc
+	ch <- upgradeConfigInfoDesc
 	ch <- upgradeConfigNextPossibleScheduleDesc
 }
 
@@ -164,6 +177,15 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.NewInvalidMetric(upgradeConfigNextPossibleScheduleDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
 	} else {
 		for _, config := range configs.Items {
+			ch <- prometheus.MustNewConstMetric(
+				upgradeConfigInfoDesc,
+				prometheus.GaugeValue,
+				1,
+				config.Name,
+				config.Spec.Schedule.Cron,
+				config.Spec.Schedule.Location,
+				strconv.FormatBool(config.Spec.Schedule.Suspend),
+			)
 			for i, nps := range config.Status.NextPossibleSchedules {
 				ch <- prometheus.MustNewConstMetric(
 					upgradeConfigNextPossibleScheduleDesc,

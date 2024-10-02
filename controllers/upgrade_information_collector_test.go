@@ -264,6 +264,7 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 
 func Test_UpgradeConfigMetric(t *testing.T) {
 	expectedMetricNames := []string{
+		"openshift_upgrade_controller_upgradeconfig_info",
 		"openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds",
 	}
 
@@ -275,6 +276,13 @@ func Test_UpgradeConfigMetric(t *testing.T) {
 	uc := &managedupgradev1beta1.UpgradeConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "myconfig",
+		},
+		Spec: managedupgradev1beta1.UpgradeConfigSpec{
+			Schedule: managedupgradev1beta1.UpgradeConfigSchedule{
+				Cron:     "0 22 * * *",
+				IsoWeek:  "@odd",
+				Location: "UTC",
+			},
 		},
 		Status: managedupgradev1beta1.UpgradeConfigStatus{
 			NextPossibleSchedules: []managedupgradev1beta1.NextPossibleSchedule{
@@ -296,6 +304,10 @@ func Test_UpgradeConfigMetric(t *testing.T) {
 	}
 
 	metrics := `
+# HELP openshift_upgrade_controller_upgradeconfig_info Information about the upgradeconfig object
+# TYPE openshift_upgrade_controller_upgradeconfig_info gauge
+openshift_upgrade_controller_upgradeconfig_info{cron="0 22 * * *",location="UTC",suspended="false",upgradeconfig="myconfig"} 1
+
 # HELP openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds The value of the time field of the next possible schedule for an upgrade.
 # TYPE openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds gauge
 openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds{n="0",timestamp="2022-12-04T22:45:00Z",upgradeconfig="myconfig"} 1.6701939e+09
