@@ -2,11 +2,10 @@ package schedule
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/robfig/cron/v3"
-
-	scheduleutils "github.com/appuio/openshift-upgrade-controller/pkg/schedule/utils"
 )
 
 // ErrNoNextFound is returned when no no next time could be found
@@ -47,7 +46,7 @@ func (s Schedule) Next(earliest time.Time) (time.Time, error) {
 	n := s.Schedule.Next(earliest)
 	// if the next activation time is more than 1000 runs away, we assume that the cron schedule is invalid as a safe guard
 	for i := 0; i < 1000; i++ {
-		isoWeekOK, err := scheduleutils.CheckIsoWeek(n, s.IsoWeek)
+		isoWeekOK, err := checkIsoWeek(n, s.IsoWeek)
 		if err != nil {
 			return time.Time{}, err
 		}
@@ -57,4 +56,28 @@ func (s Schedule) Next(earliest time.Time) (time.Time, error) {
 		n = s.Schedule.Next(n)
 	}
 	return time.Time{}, fmt.Errorf("could not find next scheduled time, checked until %q: %w", n, ErrNoNextFound)
+}
+
+// checkIsoWeek checks if the given time is in the given iso week.
+// The iso week can be one of the following:
+// - "": every iso week
+// - "@even": every even iso week
+// - "@odd": every odd iso week
+// - "<N>": every iso week N
+func checkIsoWeek(t time.Time, schedISOWeek string) (bool, error) {
+	_, iw := t.ISOWeek()
+	switch schedISOWeek {
+	case "":
+		return true, nil
+	case "@even":
+		return iw%2 == 0, nil
+	case "@odd":
+		return iw%2 == 1, nil
+	}
+
+	nw, err := strconv.ParseInt(schedISOWeek, 10, 64)
+	if err == nil {
+		return nw == int64(iw), nil
+	}
+	return false, fmt.Errorf("unknown iso week: %s", schedISOWeek)
 }
