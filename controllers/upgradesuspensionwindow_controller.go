@@ -15,7 +15,7 @@ import (
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 )
 
-// UpgradeSuspensionWindowReconciler reconciles a UpgradeConfig object
+// UpgradeSuspensionWindowReconciler reconciles a UpgradeSuspensionWindow object
 type UpgradeSuspensionWindowReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
