@@ -1,14 +1,7 @@
 apiVersion: managedupgrade.appuio.io/v1beta1
 kind: UpgradeConfig
 metadata:
-  labels:
-    app.kubernetes.io/name: upgradeconfig
-    app.kubernetes.io/instance: upgradeconfig-sample
-    app.kubernetes.io/part-of: openshift-upgrade-controller
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: openshift-upgrade-controller
   name: upgradeconfig-sample
-  namespace: appuio-openshift-upgrade-controller
 spec:
   maxSchedulingDelay: 1h
   maxUpgradeStartDelay: 1h
