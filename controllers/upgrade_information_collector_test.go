@@ -322,6 +322,7 @@ openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds{upgra
 func Test_UpgradeConfigMetric(t *testing.T) {
 	expectedMetricNames := []string{
 		"openshift_upgrade_controller_upgradeconfig_info",
+		"openshift_upgrade_controller_upgradeconfig_pin_version_window_seconds",
 		"openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds",
 	}
 
@@ -340,6 +341,7 @@ func Test_UpgradeConfigMetric(t *testing.T) {
 				IsoWeek:  "@odd",
 				Location: "UTC",
 			},
+			PinVersionWindow: metav1.Duration{Duration: time.Hour},
 		},
 		Status: managedupgradev1beta1.UpgradeConfigStatus{
 			NextPossibleSchedules: []managedupgradev1beta1.NextPossibleSchedule{
@@ -364,6 +366,10 @@ func Test_UpgradeConfigMetric(t *testing.T) {
 # HELP openshift_upgrade_controller_upgradeconfig_info Information about the upgradeconfig object
 # TYPE openshift_upgrade_controller_upgradeconfig_info gauge
 openshift_upgrade_controller_upgradeconfig_info{cron="0 22 * * *",location="UTC",suspended="false",upgradeconfig="myconfig"} 1
+
+# HELP openshift_upgrade_controller_upgradeconfig_pin_version_window_seconds The value of the pinVersionWindow field of the upgradeconfig.
+# TYPE openshift_upgrade_controller_upgradeconfig_pin_version_window_seconds gauge
+openshift_upgrade_controller_upgradeconfig_pin_version_window_seconds{upgradeconfig="myconfig"} 3600
 
 # HELP openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds The value of the time field of the next possible schedule for an upgrade.
 # TYPE openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds gauge

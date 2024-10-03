@@ -80,18 +80,6 @@ var jobStartBeforeDesc = prometheus.NewDesc(
 	nil,
 )
 
-var upgradeConfigInfoDesc = prometheus.NewDesc(
-	MetricsNamespace+"_upgradeconfig_info",
-	"Information about the upgradeconfig object",
-	[]string{
-		"upgradeconfig",
-		"cron",
-		"location",
-		"suspended",
-	},
-	nil,
-)
-
 var upgradeSuspensionWindowInfoDesc = prometheus.NewDesc(
 	MetricsNamespace+"_upgradesuspensionwindow_info",
 	"Information about the upgradesuspensionwindow object",
@@ -130,6 +118,27 @@ var upgradeSuspensionWindowMatchingConfigsDesc = prometheus.NewDesc(
 	nil,
 )
 
+var upgradeConfigInfoDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradeconfig_info",
+	"Information about the upgradeconfig object",
+	[]string{
+		"upgradeconfig",
+		"cron",
+		"location",
+		"suspended",
+	},
+	nil,
+)
+
+var upgradeConfigPinVersionWindowDesc = prometheus.NewDesc(
+	MetricsNamespace+"_upgradeconfig_pin_version_window_seconds",
+	"The value of the pinVersionWindow field of the upgradeconfig.",
+	[]string{
+		"upgradeconfig",
+	},
+	nil,
+)
+
 var upgradeConfigNextPossibleScheduleDesc = prometheus.NewDesc(
 	MetricsNamespace+"_upgradeconfig_next_possible_schedule_timestamp_seconds",
 	"The value of the time field of the next possible schedule for an upgrade.",
@@ -160,6 +169,7 @@ func (*UpgradeInformationCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- jobStartAfterDesc
 	ch <- jobStartBeforeDesc
 	ch <- upgradeConfigInfoDesc
+	ch <- upgradeConfigPinVersionWindowDesc
 	ch <- upgradeConfigNextPossibleScheduleDesc
 	ch <- upgradeSuspensionWindowInfoDesc
 	ch <- upgradeSuspensionWindowStartDesc
@@ -216,10 +226,11 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 
 	var windows managedupgradev1beta1.UpgradeSuspensionWindowList
 	if err := m.Client.List(ctx, &windows); err != nil {
-		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowInfoDesc, fmt.Errorf("failed to list upgrade suspension windows: %w", err))
-		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowStartDesc, fmt.Errorf("failed to list upgrade suspension windows: %w", err))
-		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowEndDesc, fmt.Errorf("failed to list upgrade suspension windows: %w", err))
-		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowMatchingConfigsDesc, fmt.Errorf("failed to list upgrade suspension windows: %w", err))
+		ferr := fmt.Errorf("failed to list upgrade suspension windows: %w", err)
+		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowInfoDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowStartDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowEndDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(upgradeSuspensionWindowMatchingConfigsDesc, ferr)
 	} else {
 		for _, window := range windows.Items {
 			ch <- prometheus.MustNewConstMetric(
@@ -255,7 +266,10 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 
 	var configs managedupgradev1beta1.UpgradeConfigList
 	if err := m.Client.List(ctx, &configs); err != nil {
-		ch <- prometheus.NewInvalidMetric(upgradeConfigNextPossibleScheduleDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
+		ferr := fmt.Errorf("failed to list upgrade configs: %w", err)
+		ch <- prometheus.NewInvalidMetric(upgradeConfigInfoDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(upgradeConfigPinVersionWindowDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(upgradeConfigNextPossibleScheduleDesc, ferr)
 	} else {
 		for _, config := range configs.Items {
 			ch <- prometheus.MustNewConstMetric(
@@ -266,6 +280,12 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 				config.Spec.Schedule.Cron,
 				config.Spec.Schedule.Location,
 				strconv.FormatBool(config.Spec.Schedule.Suspend),
+			)
+			ch <- prometheus.MustNewConstMetric(
+				upgradeConfigPinVersionWindowDesc,
+				prometheus.GaugeValue,
+				float64(config.Spec.PinVersionWindow.Seconds()),
+				config.Name,
 			)
 			for i, nps := range config.Status.NextPossibleSchedules {
 				ch <- prometheus.MustNewConstMetric(
@@ -282,17 +302,19 @@ func (m *UpgradeInformationCollector) Collect(ch chan<- prometheus.Metric) {
 
 	var jobs managedupgradev1beta1.UpgradeJobList
 	if err := m.Client.List(ctx, &jobs); err != nil {
-		ch <- prometheus.NewInvalidMetric(jobStateDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
-		ch <- prometheus.NewInvalidMetric(jobStartAfterDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
-		ch <- prometheus.NewInvalidMetric(jobStartBeforeDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
+		ferr := fmt.Errorf("failed to list upgrade jobs: %w", err)
+		ch <- prometheus.NewInvalidMetric(jobStateDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(jobStartAfterDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(jobStartBeforeDesc, ferr)
 		return
 	}
 
 	var jobsHooks managedupgradev1beta1.UpgradeJobHookList
 	if err := m.Client.List(ctx, &jobsHooks); err != nil {
-		ch <- prometheus.NewInvalidMetric(jobStateDesc, fmt.Errorf("failed to list upgrade job hooks: %w", err))
-		ch <- prometheus.NewInvalidMetric(jobStartAfterDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
-		ch <- prometheus.NewInvalidMetric(jobStartBeforeDesc, fmt.Errorf("failed to list upgrade jobs: %w", err))
+		ferr := fmt.Errorf("failed to list upgrade job hooks: %w", err)
+		ch <- prometheus.NewInvalidMetric(jobStateDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(jobStartAfterDesc, ferr)
+		ch <- prometheus.NewInvalidMetric(jobStartBeforeDesc, ferr)
 		return
 	}
 
