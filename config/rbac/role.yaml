@@ -156,3 +156,5 @@ rules:
   - upgradesuspensionwindows/status
   verbs:
   - get
+  - patch
+  - update

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -207,6 +208,75 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 		jobs = listJobs(t, client, upgradeConfig.Namespace)
 		require.Len(t, jobs, 2)
 	})
+}
+
+func Test_UpgradeConfigReconciler_Reconcile_AddNextWindowsToStatus(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.UTC)}
+	t.Log("Now: ", clock.Now())
+	require.Equal(t, 14, func() int { _, isoweek := clock.Now().ISOWeek(); return isoweek }())
+	require.Equal(t, time.Monday, clock.Now().Weekday())
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+	}
+
+	upgradeConfig := &managedupgradev1beta1.UpgradeConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "daily-maintenance",
+			Namespace:         "appuio-openshift-upgrade-controller",
+			CreationTimestamp: metav1.Time{Time: clock.Now().Add(-time.Hour)},
+		},
+		Spec: managedupgradev1beta1.UpgradeConfigSpec{
+			Schedule: managedupgradev1beta1.UpgradeConfigSchedule{
+				Cron:     "0 22 * * *", // At 22:00 every day
+				Location: "UTC",
+				Suspend:  true,
+			},
+			MaxSchedulingDelay: metav1.Duration{Duration: time.Minute},
+			JobTemplate: managedupgradev1beta1.UpgradeConfigJobTemplate{
+				Metadata: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "openshift-upgrade-controller"},
+				},
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeConfig)
+
+	recorder := record.NewFakeRecorder(5)
+	subject := &UpgradeConfigReconciler{
+		Client:   client,
+		Scheme:   client.Scheme(),
+		Recorder: recorder,
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	res, err := subject.Reconcile(ctx, requestForObject(upgradeConfig))
+	require.NoError(t, err)
+
+	var uuc managedupgradev1beta1.UpgradeConfig
+	require.NoError(t, client.Get(ctx, types.NamespacedName{Name: upgradeConfig.Name, Namespace: upgradeConfig.Namespace}, &uuc))
+	nextTime := time.Date(2022, time.April, 4, 22, 0, 0, 0, time.UTC)
+	assert.Equal(t, res.RequeueAfter, nextTime.Sub(clock.Now()))
+
+	expected := make([]string, 10)
+	for i := 0; i < 10; i++ {
+		expected[i] = nextTime.Format(time.RFC3339)
+		nextTime = nextTime.Add(24 * time.Hour)
+	}
+
+	got := make([]string, 10)
+	for i, t := range uuc.Status.NextPossibleSchedules {
+		got[i] = t.Time.UTC().Format(time.RFC3339)
+	}
+
+	assert.Equal(t, expected, got)
 }
 
 func Test_UpgradeConfigReconciler_Reconcile_SuspendedByWindow(t *testing.T) {

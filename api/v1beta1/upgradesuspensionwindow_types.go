@@ -32,6 +32,14 @@ type UpgradeSuspensionWindowSpec struct {
 
 // UpgradeSuspensionWindowStatus defines the observed state of UpgradeSuspensionWindow
 type UpgradeSuspensionWindowStatus struct {
+	// MatchingConfigs are the UpgradeConfigs that are matched by the ConfigSelector.
+	MatchingConfigs []UpgradeSuspensionWindowStatusMatchingObject `json:"matchingConfigs,omitempty"`
+	// MatchingJobs are the UpgradeJobs that are matched by the JobSelector.
+	MatchingJobs []UpgradeSuspensionWindowStatusMatchingObject `json:"matchingJobs,omitempty"`
+}
+
+type UpgradeSuspensionWindowStatusMatchingObject struct {
+	Name string `json:"name"`
 }
 
 //+kubebuilder:object:root=true

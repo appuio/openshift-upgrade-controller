@@ -160,6 +160,29 @@ spec:
           status:
             description: UpgradeSuspensionWindowStatus defines the observed state
               of UpgradeSuspensionWindow
+            properties:
+              matchingConfigs:
+                description: MatchingConfigs are the UpgradeConfigs that are matched
+                  by the ConfigSelector.
+                items:
+                  properties:
+                    name:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              matchingJobs:
+                description: MatchingJobs are the UpgradeJobs that are matched by
+                  the JobSelector.
+                items:
+                  properties:
+                    name:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
             type: object
         type: object
     served: true

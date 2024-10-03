@@ -67,6 +67,15 @@ type UpgradeConfigStatus struct {
 	// Also is increased when a job would have been created, but was not created due to the config being suspended.
 	// +optional
 	LastScheduledUpgrade *metav1.Time `json:"lastScheduledUpgrade,omitempty"`
+
+	// NextPossibleSchedules is a list of the next possible schedules for an upgrade.
+	NextPossibleSchedules []NextPossibleSchedule `json:"nextPossibleSchedules"`
+}
+
+// NextPossibleSchedule defines the next possible schedule for an upgrade
+type NextPossibleSchedule struct {
+	// Time is the time of the next possible schedule
+	Time metav1.Time `json:"time"`
 }
 
 //+kubebuilder:object:root=true

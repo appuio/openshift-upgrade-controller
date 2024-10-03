@@ -19,6 +19,8 @@ import (
 func Test_ClusterUpgradingMetric(t *testing.T) {
 	expectedMetricNames := []string{
 		"openshift_upgrade_controller_upgradejob_state",
+		"openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds",
+		"openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds",
 		"openshift_upgrade_controller_cluster_upgrading",
 		"openshift_upgrade_controller_machine_config_pools_upgrading",
 		"openshift_upgrade_controller_machine_config_pools_paused",
@@ -233,7 +235,7 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 	}
 
 	require.NoError(t,
-		testutil.CollectAndCompare(subject, expectedMetrics(true, false, false), expectedMetricNames...),
+		testutil.CollectAndCompare(subject, expectedUpgradingMetrics(true, false, false), expectedMetricNames...),
 		"upgrading should be true if cluster version is progressing",
 	)
 
@@ -247,7 +249,7 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 	require.NoError(t, c.Status().Update(context.Background(), workerPool))
 
 	require.NoError(t,
-		testutil.CollectAndCompare(subject, expectedMetrics(true, false, true), expectedMetricNames...),
+		testutil.CollectAndCompare(subject, expectedUpgradingMetrics(true, false, true), expectedMetricNames...),
 		"upgrading should be true if cluster version is progressing or a machine config pool is not fully upgraded",
 	)
 
@@ -255,12 +257,127 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 	require.NoError(t, c.Status().Update(context.Background(), workerPool))
 
 	require.NoError(t,
-		testutil.CollectAndCompare(subject, expectedMetrics(false, false, false), expectedMetricNames...),
+		testutil.CollectAndCompare(subject, expectedUpgradingMetrics(false, false, false), expectedMetricNames...),
 		"upgrading should be false if cluster version is not progressing and all machine config pools are fully upgraded",
 	)
 }
 
-func expectedMetrics(upgrading, masterUpgrading, workerUpgrading bool) io.Reader {
+func Test_UpgradeSuspensionWindowMetric(t *testing.T) {
+	expectedMetricNames := []string{
+		"openshift_upgrade_controller_upgradesuspensionwindow_info",
+		"openshift_upgrade_controller_upgradesuspensionwindow_start_timestamp_seconds",
+		"openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds",
+		"openshift_upgrade_controller_upgradesuspensionwindow_matching_config",
+	}
+
+	version := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+	}
+	usw := &managedupgradev1beta1.UpgradeSuspensionWindow{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "mywindow",
+		},
+		Spec: managedupgradev1beta1.UpgradeSuspensionWindowSpec{
+			Start:  metav1.NewTime(time.Date(2022, 3, 1, 0, 0, 0, 0, time.UTC)),
+			End:    metav1.NewTime(time.Date(2022, 6, 1, 0, 0, 0, 0, time.UTC)),
+			Reason: "No moar upgrades",
+		},
+		Status: managedupgradev1beta1.UpgradeSuspensionWindowStatus{
+			MatchingConfigs: []managedupgradev1beta1.UpgradeSuspensionWindowStatusMatchingObject{
+				{Name: "matching1"},
+				{Name: "matching2"},
+			},
+		},
+	}
+	c := controllerClient(t, version, usw)
+	subject := &UpgradeInformationCollector{
+		Client: c,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	metrics := `
+# HELP openshift_upgrade_controller_upgradesuspensionwindow_info Information about the upgradesuspensionwindow object
+# TYPE openshift_upgrade_controller_upgradesuspensionwindow_info gauge
+openshift_upgrade_controller_upgradesuspensionwindow_info{reason="No moar upgrades",upgradesuspensionwindow="mywindow"} 1
+# HELP openshift_upgrade_controller_upgradesuspensionwindow_matching_config Matching UpgradeConfigs for the suspension window
+# TYPE openshift_upgrade_controller_upgradesuspensionwindow_matching_config gauge
+openshift_upgrade_controller_upgradesuspensionwindow_matching_config{config="matching1",upgradesuspensionwindow="mywindow"} 1
+openshift_upgrade_controller_upgradesuspensionwindow_matching_config{config="matching2",upgradesuspensionwindow="mywindow"} 1
+# HELP openshift_upgrade_controller_upgradesuspensionwindow_start_timestamp_seconds The value of the start field of the suspension window.
+# TYPE openshift_upgrade_controller_upgradesuspensionwindow_start_timestamp_seconds gauge
+openshift_upgrade_controller_upgradesuspensionwindow_start_timestamp_seconds{upgradesuspensionwindow="mywindow"} 1.6460928e+09
+# HELP openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds The value of the start field of the suspension window.
+# TYPE openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds gauge
+openshift_upgrade_controller_upgradesuspensionwindow_end_timestamp_seconds{upgradesuspensionwindow="mywindow"} 1.6540416e+09
+`
+
+	require.NoError(t,
+		testutil.CollectAndCompare(subject, strings.NewReader(metrics), expectedMetricNames...),
+	)
+}
+
+func Test_UpgradeConfigMetric(t *testing.T) {
+	expectedMetricNames := []string{
+		"openshift_upgrade_controller_upgradeconfig_info",
+		"openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds",
+	}
+
+	version := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+	}
+	uc := &managedupgradev1beta1.UpgradeConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "myconfig",
+		},
+		Spec: managedupgradev1beta1.UpgradeConfigSpec{
+			Schedule: managedupgradev1beta1.UpgradeConfigSchedule{
+				Cron:     "0 22 * * *",
+				IsoWeek:  "@odd",
+				Location: "UTC",
+			},
+		},
+		Status: managedupgradev1beta1.UpgradeConfigStatus{
+			NextPossibleSchedules: []managedupgradev1beta1.NextPossibleSchedule{
+				{
+					Time: metav1.Time{Time: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)},
+				}, {
+					Time: metav1.Time{Time: time.Date(2022, 12, 24, 22, 45, 0, 0, time.UTC)},
+				}, {
+					Time: metav1.Time{Time: time.Date(2023, 2, 7, 22, 45, 0, 0, time.UTC)},
+				},
+			},
+		},
+	}
+	c := controllerClient(t, version, uc)
+	subject := &UpgradeInformationCollector{
+		Client: c,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	metrics := `
+# HELP openshift_upgrade_controller_upgradeconfig_info Information about the upgradeconfig object
+# TYPE openshift_upgrade_controller_upgradeconfig_info gauge
+openshift_upgrade_controller_upgradeconfig_info{cron="0 22 * * *",location="UTC",suspended="false",upgradeconfig="myconfig"} 1
+
+# HELP openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds The value of the time field of the next possible schedule for an upgrade.
+# TYPE openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds gauge
+openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds{n="0",timestamp="2022-12-04T22:45:00Z",upgradeconfig="myconfig"} 1.6701939e+09
+openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds{n="1",timestamp="2022-12-24T22:45:00Z",upgradeconfig="myconfig"} 1.6719219e+09
+openshift_upgrade_controller_upgradeconfig_next_possible_schedule_timestamp_seconds{n="2",timestamp="2023-02-07T22:45:00Z",upgradeconfig="myconfig"} 1.6758099e+09
+`
+
+	require.NoError(t,
+		testutil.CollectAndCompare(subject, strings.NewReader(metrics), expectedMetricNames...),
+	)
+}
+
+func expectedUpgradingMetrics(upgrading, masterUpgrading, workerUpgrading bool) io.Reader {
 	metrics := `
 # HELP openshift_upgrade_controller_cluster_upgrading Set to 1 if the cluster is currently upgrading, 0 otherwise.
 # TYPE openshift_upgrade_controller_cluster_upgrading gauge
@@ -288,6 +405,27 @@ openshift_upgrade_controller_upgradejob_state{desired_version_force="true",desir
 openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="true",reason="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="pending",upgradejob="disruptive"} 1
 openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="true",reason="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="pending",upgradejob="disruptive-unclaimed-next"} 1
 openshift_upgrade_controller_upgradejob_state{desired_version_force="false",desired_version_image="",desired_version_version="",matches_disruptive_hooks="false",reason="",start_after="0001-01-01T00:00:00Z",start_before="0001-01-01T00:00:00Z",state="pending",upgradejob="disruptive-claimed-next"} 1
+
+# HELP openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds The value of the startAfter field of the job.
+# TYPE openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds gauge
+openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds{upgradejob="active"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds{upgradejob="disruptive"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds{upgradejob="disruptive-claimed-next"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds{upgradejob="disruptive-unclaimed-next"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds{upgradejob="failed"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds{upgradejob="paused"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds{upgradejob="pending"} 1.5795504e+09
+openshift_upgrade_controller_upgradejob_start_after_timestamp_seconds{upgradejob="succeeded"} -6.21355968e+10
+# HELP openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds The value of the startBefore field of the job.
+# TYPE openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds gauge
+openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds{upgradejob="active"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds{upgradejob="disruptive"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds{upgradejob="disruptive-claimed-next"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds{upgradejob="disruptive-unclaimed-next"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds{upgradejob="failed"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds{upgradejob="paused"} -6.21355968e+10
+openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds{upgradejob="pending"} 1.579554e+09
+openshift_upgrade_controller_upgradejob_start_before_timestamp_seconds{upgradejob="succeeded"} -6.21355968e+10
 `
 	return strings.NewReader(
 		fmt.Sprintf(metrics, b2i(upgrading), b2i(masterUpgrading), b2i(workerUpgrading)),
