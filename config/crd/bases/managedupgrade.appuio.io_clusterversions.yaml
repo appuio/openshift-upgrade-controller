@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.15.0
+    controller-gen.kubebuilder.io/version: v0.16.3
   name: clusterversions.managedupgrade.appuio.io
 spec:
   group: managedupgrade.appuio.io
@@ -123,7 +123,6 @@ spec:
                                 status, and setting values outside that range may cause the upgrade
                                 to fail. You may specify the version field without setting image if
                                 an update exists with that version in the availableUpdates or history.
-
 
                                 If an upgrade fails the operator will halt and report status
                                 about the failing component. Setting the desired update value back to
@@ -271,7 +270,6 @@ spec:
                           to fail. You may specify the version field without setting image if
                           an update exists with that version in the availableUpdates or history.
 
-
                           If an upgrade fails the operator will halt and report status
                           about the failing component. Setting the desired update value back to
                           the previous version will cause a rollback to be attempted. Not all
@@ -414,7 +412,6 @@ spec:
                       status, and setting values outside that range may cause the upgrade
                       to fail. You may specify the version field without setting image if
                       an update exists with that version in the availableUpdates or history.
-
 
                       If an upgrade fails the operator will halt and report status
                       about the failing component. Setting the desired update value back to
@@ -574,7 +571,6 @@ spec:
                                 status, and setting values outside that range may cause the upgrade
                                 to fail. You may specify the version field without setting image if
                                 an update exists with that version in the availableUpdates or history.
-
 
                                 If an upgrade fails the operator will halt and report status
                                 about the failing component. Setting the desired update value back to
