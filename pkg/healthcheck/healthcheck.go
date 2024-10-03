@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	configv1 "github.com/openshift/api/config/v1"
-	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	machineconfigurationv1 "github.com/openshift/api/machineconfiguration/v1"
 )
 
 // IsOperatorDegraded returns whether an operator is degraded in the cluster
