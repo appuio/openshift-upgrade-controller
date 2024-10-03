@@ -8,7 +8,7 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
-	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	machineconfigurationv1 "github.com/openshift/api/machineconfiguration/v1"
 	"github.com/stretchr/testify/require"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"

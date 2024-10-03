@@ -7,7 +7,7 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
-	machineconfigurationv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
+	machineconfigurationv1 "github.com/openshift/api/machineconfiguration/v1"
 	"github.com/prometheus/client_golang/prometheus"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

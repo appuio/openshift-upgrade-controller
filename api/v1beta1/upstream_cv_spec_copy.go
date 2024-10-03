@@ -54,6 +54,24 @@ type ConfigV1ClusterVersionSpec struct {
 	// +optional
 	Capabilities *configv1.ClusterVersionCapabilitiesSpec `json:"capabilities,omitempty"`
 
+	// signatureStores contains the upstream URIs to verify release signatures and optional
+	// reference to a config map by name containing the PEM-encoded CA bundle.
+	//
+	// By default, CVO will use existing signature stores if this property is empty.
+	// The CVO will check the release signatures in the local ConfigMaps first. It will search for a valid signature
+	// in these stores in parallel only when local ConfigMaps did not include a valid signature.
+	// Validation will fail if none of the signature stores reply with valid signature before timeout.
+	// Setting signatureStores will replace the default signature stores with custom signature stores.
+	// Default stores can be used with custom signature stores by adding them manually.
+	//
+	// A maximum of 32 signature stores may be configured.
+	// +kubebuilder:validation:MaxItems=32
+	// +openshift:enable:FeatureSets=CustomNoUpgrade;TechPreviewNoUpgrade
+	// +listType=map
+	// +listMapKey=url
+	// +optional
+	SignatureStores []configv1.SignatureStore `json:"signatureStores"`
+
 	// overrides is list of overides for components that are managed by
 	// cluster version operator. Marking a component unmanaged will prevent
 	// the operator from creating or updating the object.

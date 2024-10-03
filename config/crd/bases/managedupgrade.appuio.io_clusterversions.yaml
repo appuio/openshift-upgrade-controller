@@ -85,6 +85,13 @@ spec:
                                     - Insights
                                     - Storage
                                     - CSISnapshot
+                                    - NodeTuning
+                                    - MachineAPI
+                                    - Build
+                                    - DeploymentConfig
+                                    - ImageRegistry
+                                    - OperatorLifecycleManager
+                                    - CloudCredential
                                     type: string
                                   type: array
                                   x-kubernetes-list-type: atomic
@@ -99,6 +106,9 @@ spec:
                                   - None
                                   - v4.11
                                   - v4.12
+                                  - v4.13
+                                  - v4.14
+                                  - v4.15
                                   - vCurrent
                                   type: string
                               type: object
@@ -129,6 +139,20 @@ spec:
                                 the previous version will cause a rollback to be attempted. Not all
                                 rollbacks will succeed.
                               properties:
+                                architecture:
+                                  description: |-
+                                    architecture is an optional field that indicates the desired
+                                    value of the cluster architecture. In this context cluster
+                                    architecture means either a single architecture or a multi
+                                    architecture. architecture can only be set to Multi thereby
+                                    only allowing updates from single to multi architecture. If
+                                    architecture is set, image cannot be set and version must be
+                                    set.
+                                    Valid values are 'Multi' and empty.
+                                  enum:
+                                  - Multi
+                                  - ""
+                                  type: string
                                 force:
                                   description: |-
                                     force allows an administrator to update to an image that has failed
@@ -140,16 +164,26 @@ spec:
                                   type: boolean
                                 image:
                                   description: |-
-                                    image is a container image location that contains the update. When this
-                                    field is part of spec, image is optional if version is specified and the
-                                    availableUpdates field contains a matching version.
+                                    image is a container image location that contains the update.
+                                    image should be used when the desired version does not exist in availableUpdates or history.
+                                    When image is set, version is ignored. When image is set, version should be empty.
+                                    When image is set, architecture cannot be specified.
                                   type: string
                                 version:
                                   description: |-
-                                    version is a semantic versioning identifying the update version. When this
-                                    field is part of spec, version is optional if image is specified.
+                                    version is a semantic version identifying the update version.
+                                    version is ignored if image is specified and required if
+                                    architecture is specified.
                                   type: string
                               type: object
+                              x-kubernetes-validations:
+                              - message: cannot set both Architecture and Image
+                                rule: 'has(self.architecture) && has(self.image) ?
+                                  (self.architecture == '''' || self.image == '''')
+                                  : true'
+                              - message: Version must be set if Architecture is set
+                                rule: 'has(self.architecture) && self.architecture
+                                  != '''' ? self.version != '''' : true'
                             overrides:
                               description: |-
                                 overrides is list of overides for components that are managed by
@@ -190,6 +224,57 @@ spec:
                                 - unmanaged
                                 type: object
                               type: array
+                            signatureStores:
+                              description: |-
+                                signatureStores contains the upstream URIs to verify release signatures and optional
+                                reference to a config map by name containing the PEM-encoded CA bundle.
+
+                                By default, CVO will use existing signature stores if this property is empty.
+                                The CVO will check the release signatures in the local ConfigMaps first. It will search for a valid signature
+                                in these stores in parallel only when local ConfigMaps did not include a valid signature.
+                                Validation will fail if none of the signature stores reply with valid signature before timeout.
+                                Setting signatureStores will replace the default signature stores with custom signature stores.
+                                Default stores can be used with custom signature stores by adding them manually.
+
+                                A maximum of 32 signature stores may be configured.
+                              items:
+                                description: SignatureStore represents the URL of
+                                  custom Signature Store
+                                properties:
+                                  ca:
+                                    description: |-
+                                      ca is an optional reference to a config map by name containing the PEM-encoded CA bundle.
+                                      It is used as a trust anchor to validate the TLS certificate presented by the remote server.
+                                      The key "ca.crt" is used to locate the data.
+                                      If specified and the config map or expected key is not found, the signature store is not honored.
+                                      If the specified ca data is not valid, the signature store is not honored.
+                                      If empty, we fall back to the CA configured via Proxy, which is appended to the default system roots.
+                                      The namespace for this config map is openshift-config.
+                                    properties:
+                                      name:
+                                        description: name is the metadata.name of
+                                          the referenced config map
+                                        type: string
+                                    required:
+                                    - name
+                                    type: object
+                                  url:
+                                    description: |-
+                                      url contains the upstream custom signature store URL.
+                                      url should be a valid absolute http/https URI of an upstream signature store as per rfc1738.
+                                      This must be provided and cannot be empty.
+                                    type: string
+                                    x-kubernetes-validations:
+                                    - message: url must be a valid absolute URL
+                                      rule: isURL(self)
+                                required:
+                                - url
+                                type: object
+                              maxItems: 32
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - url
+                              x-kubernetes-list-type: map
                             upstream:
                               description: |-
                                 upstream may be used to specify the preferred update server. By default
@@ -231,6 +316,13 @@ spec:
                               - Insights
                               - Storage
                               - CSISnapshot
+                              - NodeTuning
+                              - MachineAPI
+                              - Build
+                              - DeploymentConfig
+                              - ImageRegistry
+                              - OperatorLifecycleManager
+                              - CloudCredential
                               type: string
                             type: array
                             x-kubernetes-list-type: atomic
@@ -245,6 +337,9 @@ spec:
                             - None
                             - v4.11
                             - v4.12
+                            - v4.13
+                            - v4.14
+                            - v4.15
                             - vCurrent
                             type: string
                         type: object
@@ -267,14 +362,37 @@ spec:
                           the current version does not match the desired version). The set of
                           recommended update values is listed as part of available updates in
                           status, and setting values outside that range may cause the upgrade
-                          to fail. You may specify the version field without setting image if
-                          an update exists with that version in the availableUpdates or history.
+                          to fail.
+
+                          Some of the fields are inter-related with restrictions and meanings described here.
+                          1. image is specified, version is specified, architecture is specified. API validation error.
+                          2. image is specified, version is specified, architecture is not specified. You should not do this. version is silently ignored and image is used.
+                          3. image is specified, version is not specified, architecture is specified. API validation error.
+                          4. image is specified, version is not specified, architecture is not specified. image is used.
+                          5. image is not specified, version is specified, architecture is specified. version and desired architecture are used to select an image.
+                          6. image is not specified, version is specified, architecture is not specified. version and current architecture are used to select an image.
+                          7. image is not specified, version is not specified, architecture is specified. API validation error.
+                          8. image is not specified, version is not specified, architecture is not specified. API validation error.
 
                           If an upgrade fails the operator will halt and report status
                           about the failing component. Setting the desired update value back to
                           the previous version will cause a rollback to be attempted. Not all
                           rollbacks will succeed.
                         properties:
+                          architecture:
+                            description: |-
+                              architecture is an optional field that indicates the desired
+                              value of the cluster architecture. In this context cluster
+                              architecture means either a single architecture or a multi
+                              architecture. architecture can only be set to Multi thereby
+                              only allowing updates from single to multi architecture. If
+                              architecture is set, image cannot be set and version must be
+                              set.
+                              Valid values are 'Multi' and empty.
+                            enum:
+                            - Multi
+                            - ""
+                            type: string
                           force:
                             description: |-
                               force allows an administrator to update to an image that has failed
@@ -286,16 +404,25 @@ spec:
                             type: boolean
                           image:
                             description: |-
-                              image is a container image location that contains the update. When this
-                              field is part of spec, image is optional if version is specified and the
-                              availableUpdates field contains a matching version.
+                              image is a container image location that contains the update.
+                              image should be used when the desired version does not exist in availableUpdates or history.
+                              When image is set, version is ignored. When image is set, version should be empty.
+                              When image is set, architecture cannot be specified.
                             type: string
                           version:
                             description: |-
-                              version is a semantic versioning identifying the update version. When this
-                              field is part of spec, version is optional if image is specified.
+                              version is a semantic version identifying the update version.
+                              version is ignored if image is specified and required if
+                              architecture is specified.
                             type: string
                         type: object
+                        x-kubernetes-validations:
+                        - message: cannot set both Architecture and Image
+                          rule: 'has(self.architecture) && has(self.image) ? (self.architecture
+                            == '''' || self.image == '''') : true'
+                        - message: Version must be set if Architecture is set
+                          rule: 'has(self.architecture) && self.architecture != ''''
+                            ? self.version != '''' : true'
                       overrides:
                         description: |-
                           overrides is list of overides for components that are managed by
@@ -335,6 +462,63 @@ spec:
                           - unmanaged
                           type: object
                         type: array
+                        x-kubernetes-list-map-keys:
+                        - kind
+                        - group
+                        - namespace
+                        - name
+                        x-kubernetes-list-type: map
+                      signatureStores:
+                        description: |-
+                          signatureStores contains the upstream URIs to verify release signatures and optional
+                          reference to a config map by name containing the PEM-encoded CA bundle.
+
+                          By default, CVO will use existing signature stores if this property is empty.
+                          The CVO will check the release signatures in the local ConfigMaps first. It will search for a valid signature
+                          in these stores in parallel only when local ConfigMaps did not include a valid signature.
+                          Validation will fail if none of the signature stores reply with valid signature before timeout.
+                          Setting signatureStores will replace the default signature stores with custom signature stores.
+                          Default stores can be used with custom signature stores by adding them manually.
+
+                          A maximum of 32 signature stores may be configured.
+                        items:
+                          description: SignatureStore represents the URL of custom
+                            Signature Store
+                          properties:
+                            ca:
+                              description: |-
+                                ca is an optional reference to a config map by name containing the PEM-encoded CA bundle.
+                                It is used as a trust anchor to validate the TLS certificate presented by the remote server.
+                                The key "ca.crt" is used to locate the data.
+                                If specified and the config map or expected key is not found, the signature store is not honored.
+                                If the specified ca data is not valid, the signature store is not honored.
+                                If empty, we fall back to the CA configured via Proxy, which is appended to the default system roots.
+                                The namespace for this config map is openshift-config.
+                              properties:
+                                name:
+                                  description: name is the metadata.name of the referenced
+                                    config map
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            url:
+                              description: |-
+                                url contains the upstream custom signature store URL.
+                                url should be a valid absolute http/https URI of an upstream signature store as per rfc1738.
+                                This must be provided and cannot be empty.
+                              type: string
+                              x-kubernetes-validations:
+                              - message: url must be a valid absolute URL
+                                rule: isURL(self)
+                          required:
+                          - url
+                          type: object
+                        maxItems: 32
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - url
+                        x-kubernetes-list-type: map
                       upstream:
                         description: |-
                           upstream may be used to specify the preferred update server. By default
@@ -374,6 +558,13 @@ spec:
                           - Insights
                           - Storage
                           - CSISnapshot
+                          - NodeTuning
+                          - MachineAPI
+                          - Build
+                          - DeploymentConfig
+                          - ImageRegistry
+                          - OperatorLifecycleManager
+                          - CloudCredential
                           type: string
                         type: array
                         x-kubernetes-list-type: atomic
@@ -388,6 +579,9 @@ spec:
                         - None
                         - v4.11
                         - v4.12
+                        - v4.13
+                        - v4.14
+                        - v4.15
                         - vCurrent
                         type: string
                     type: object
@@ -410,14 +604,37 @@ spec:
                       the current version does not match the desired version). The set of
                       recommended update values is listed as part of available updates in
                       status, and setting values outside that range may cause the upgrade
-                      to fail. You may specify the version field without setting image if
-                      an update exists with that version in the availableUpdates or history.
+                      to fail.
+
+                      Some of the fields are inter-related with restrictions and meanings described here.
+                      1. image is specified, version is specified, architecture is specified. API validation error.
+                      2. image is specified, version is specified, architecture is not specified. You should not do this. version is silently ignored and image is used.
+                      3. image is specified, version is not specified, architecture is specified. API validation error.
+                      4. image is specified, version is not specified, architecture is not specified. image is used.
+                      5. image is not specified, version is specified, architecture is specified. version and desired architecture are used to select an image.
+                      6. image is not specified, version is specified, architecture is not specified. version and current architecture are used to select an image.
+                      7. image is not specified, version is not specified, architecture is specified. API validation error.
+                      8. image is not specified, version is not specified, architecture is not specified. API validation error.
 
                       If an upgrade fails the operator will halt and report status
                       about the failing component. Setting the desired update value back to
                       the previous version will cause a rollback to be attempted. Not all
                       rollbacks will succeed.
                     properties:
+                      architecture:
+                        description: |-
+                          architecture is an optional field that indicates the desired
+                          value of the cluster architecture. In this context cluster
+                          architecture means either a single architecture or a multi
+                          architecture. architecture can only be set to Multi thereby
+                          only allowing updates from single to multi architecture. If
+                          architecture is set, image cannot be set and version must be
+                          set.
+                          Valid values are 'Multi' and empty.
+                        enum:
+                        - Multi
+                        - ""
+                        type: string
                       force:
                         description: |-
                           force allows an administrator to update to an image that has failed
@@ -429,16 +646,25 @@ spec:
                         type: boolean
                       image:
                         description: |-
-                          image is a container image location that contains the update. When this
-                          field is part of spec, image is optional if version is specified and the
-                          availableUpdates field contains a matching version.
+                          image is a container image location that contains the update.
+                          image should be used when the desired version does not exist in availableUpdates or history.
+                          When image is set, version is ignored. When image is set, version should be empty.
+                          When image is set, architecture cannot be specified.
                         type: string
                       version:
                         description: |-
-                          version is a semantic versioning identifying the update version. When this
-                          field is part of spec, version is optional if image is specified.
+                          version is a semantic version identifying the update version.
+                          version is ignored if image is specified and required if
+                          architecture is specified.
                         type: string
                     type: object
+                    x-kubernetes-validations:
+                    - message: cannot set both Architecture and Image
+                      rule: 'has(self.architecture) && has(self.image) ? (self.architecture
+                        == '''' || self.image == '''') : true'
+                    - message: Version must be set if Architecture is set
+                      rule: 'has(self.architecture) && self.architecture != '''' ?
+                        self.version != '''' : true'
                   overrides:
                     description: |-
                       overrides is list of overides for components that are managed by
@@ -478,6 +704,63 @@ spec:
                       - unmanaged
                       type: object
                     type: array
+                    x-kubernetes-list-map-keys:
+                    - kind
+                    - group
+                    - namespace
+                    - name
+                    x-kubernetes-list-type: map
+                  signatureStores:
+                    description: |-
+                      signatureStores contains the upstream URIs to verify release signatures and optional
+                      reference to a config map by name containing the PEM-encoded CA bundle.
+
+                      By default, CVO will use existing signature stores if this property is empty.
+                      The CVO will check the release signatures in the local ConfigMaps first. It will search for a valid signature
+                      in these stores in parallel only when local ConfigMaps did not include a valid signature.
+                      Validation will fail if none of the signature stores reply with valid signature before timeout.
+                      Setting signatureStores will replace the default signature stores with custom signature stores.
+                      Default stores can be used with custom signature stores by adding them manually.
+
+                      A maximum of 32 signature stores may be configured.
+                    items:
+                      description: SignatureStore represents the URL of custom Signature
+                        Store
+                      properties:
+                        ca:
+                          description: |-
+                            ca is an optional reference to a config map by name containing the PEM-encoded CA bundle.
+                            It is used as a trust anchor to validate the TLS certificate presented by the remote server.
+                            The key "ca.crt" is used to locate the data.
+                            If specified and the config map or expected key is not found, the signature store is not honored.
+                            If the specified ca data is not valid, the signature store is not honored.
+                            If empty, we fall back to the CA configured via Proxy, which is appended to the default system roots.
+                            The namespace for this config map is openshift-config.
+                          properties:
+                            name:
+                              description: name is the metadata.name of the referenced
+                                config map
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        url:
+                          description: |-
+                            url contains the upstream custom signature store URL.
+                            url should be a valid absolute http/https URI of an upstream signature store as per rfc1738.
+                            This must be provided and cannot be empty.
+                          type: string
+                          x-kubernetes-validations:
+                          - message: url must be a valid absolute URL
+                            rule: isURL(self)
+                      required:
+                      - url
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - url
+                    x-kubernetes-list-type: map
                   upstream:
                     description: |-
                       upstream may be used to specify the preferred update server. By default
@@ -533,6 +816,13 @@ spec:
                                     - Insights
                                     - Storage
                                     - CSISnapshot
+                                    - NodeTuning
+                                    - MachineAPI
+                                    - Build
+                                    - DeploymentConfig
+                                    - ImageRegistry
+                                    - OperatorLifecycleManager
+                                    - CloudCredential
                                     type: string
                                   type: array
                                   x-kubernetes-list-type: atomic
@@ -547,6 +837,9 @@ spec:
                                   - None
                                   - v4.11
                                   - v4.12
+                                  - v4.13
+                                  - v4.14
+                                  - v4.15
                                   - vCurrent
                                   type: string
                               type: object
@@ -569,14 +862,37 @@ spec:
                                 the current version does not match the desired version). The set of
                                 recommended update values is listed as part of available updates in
                                 status, and setting values outside that range may cause the upgrade
-                                to fail. You may specify the version field without setting image if
-                                an update exists with that version in the availableUpdates or history.
+                                to fail.
+
+                                Some of the fields are inter-related with restrictions and meanings described here.
+                                1. image is specified, version is specified, architecture is specified. API validation error.
+                                2. image is specified, version is specified, architecture is not specified. You should not do this. version is silently ignored and image is used.
+                                3. image is specified, version is not specified, architecture is specified. API validation error.
+                                4. image is specified, version is not specified, architecture is not specified. image is used.
+                                5. image is not specified, version is specified, architecture is specified. version and desired architecture are used to select an image.
+                                6. image is not specified, version is specified, architecture is not specified. version and current architecture are used to select an image.
+                                7. image is not specified, version is not specified, architecture is specified. API validation error.
+                                8. image is not specified, version is not specified, architecture is not specified. API validation error.
 
                                 If an upgrade fails the operator will halt and report status
                                 about the failing component. Setting the desired update value back to
                                 the previous version will cause a rollback to be attempted. Not all
                                 rollbacks will succeed.
                               properties:
+                                architecture:
+                                  description: |-
+                                    architecture is an optional field that indicates the desired
+                                    value of the cluster architecture. In this context cluster
+                                    architecture means either a single architecture or a multi
+                                    architecture. architecture can only be set to Multi thereby
+                                    only allowing updates from single to multi architecture. If
+                                    architecture is set, image cannot be set and version must be
+                                    set.
+                                    Valid values are 'Multi' and empty.
+                                  enum:
+                                  - Multi
+                                  - ""
+                                  type: string
                                 force:
                                   description: |-
                                     force allows an administrator to update to an image that has failed
@@ -588,16 +904,26 @@ spec:
                                   type: boolean
                                 image:
                                   description: |-
-                                    image is a container image location that contains the update. When this
-                                    field is part of spec, image is optional if version is specified and the
-                                    availableUpdates field contains a matching version.
+                                    image is a container image location that contains the update.
+                                    image should be used when the desired version does not exist in availableUpdates or history.
+                                    When image is set, version is ignored. When image is set, version should be empty.
+                                    When image is set, architecture cannot be specified.
                                   type: string
                                 version:
                                   description: |-
-                                    version is a semantic versioning identifying the update version. When this
-                                    field is part of spec, version is optional if image is specified.
+                                    version is a semantic version identifying the update version.
+                                    version is ignored if image is specified and required if
+                                    architecture is specified.
                                   type: string
                               type: object
+                              x-kubernetes-validations:
+                              - message: cannot set both Architecture and Image
+                                rule: 'has(self.architecture) && has(self.image) ?
+                                  (self.architecture == '''' || self.image == '''')
+                                  : true'
+                              - message: Version must be set if Architecture is set
+                                rule: 'has(self.architecture) && self.architecture
+                                  != '''' ? self.version != '''' : true'
                             overrides:
                               description: |-
                                 overrides is list of overides for components that are managed by
@@ -638,6 +964,63 @@ spec:
                                 - unmanaged
                                 type: object
                               type: array
+                              x-kubernetes-list-map-keys:
+                              - kind
+                              - group
+                              - namespace
+                              - name
+                              x-kubernetes-list-type: map
+                            signatureStores:
+                              description: |-
+                                signatureStores contains the upstream URIs to verify release signatures and optional
+                                reference to a config map by name containing the PEM-encoded CA bundle.
+
+                                By default, CVO will use existing signature stores if this property is empty.
+                                The CVO will check the release signatures in the local ConfigMaps first. It will search for a valid signature
+                                in these stores in parallel only when local ConfigMaps did not include a valid signature.
+                                Validation will fail if none of the signature stores reply with valid signature before timeout.
+                                Setting signatureStores will replace the default signature stores with custom signature stores.
+                                Default stores can be used with custom signature stores by adding them manually.
+
+                                A maximum of 32 signature stores may be configured.
+                              items:
+                                description: SignatureStore represents the URL of
+                                  custom Signature Store
+                                properties:
+                                  ca:
+                                    description: |-
+                                      ca is an optional reference to a config map by name containing the PEM-encoded CA bundle.
+                                      It is used as a trust anchor to validate the TLS certificate presented by the remote server.
+                                      The key "ca.crt" is used to locate the data.
+                                      If specified and the config map or expected key is not found, the signature store is not honored.
+                                      If the specified ca data is not valid, the signature store is not honored.
+                                      If empty, we fall back to the CA configured via Proxy, which is appended to the default system roots.
+                                      The namespace for this config map is openshift-config.
+                                    properties:
+                                      name:
+                                        description: name is the metadata.name of
+                                          the referenced config map
+                                        type: string
+                                    required:
+                                    - name
+                                    type: object
+                                  url:
+                                    description: |-
+                                      url contains the upstream custom signature store URL.
+                                      url should be a valid absolute http/https URI of an upstream signature store as per rfc1738.
+                                      This must be provided and cannot be empty.
+                                    type: string
+                                    x-kubernetes-validations:
+                                    - message: url must be a valid absolute URL
+                                      rule: isURL(self)
+                                required:
+                                - url
+                                type: object
+                              maxItems: 32
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - url
+                              x-kubernetes-list-type: map
                             upstream:
                               description: |-
                                 upstream may be used to specify the preferred update server. By default
