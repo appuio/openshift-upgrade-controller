@@ -1,12 +1,16 @@
 apiVersion: managedupgrade.appuio.io/v1beta1
 kind: ClusterVersion
 metadata:
-  labels:
-    app.kubernetes.io/name: clusterversion
-    app.kubernetes.io/instance: clusterversion-sample
-    app.kubernetes.io/part-of: openshift-upgrade-controller
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: openshift-upgrade-controller
-  name: clusterversion-sample
+  name: version
 spec:
-  # TODO(user): Add fields here
+  overlays:
+    - from: '2024-08-08T03:00:00Z'
+      overlay:
+        spec:
+          channel: stable-4.15
+  template:
+    spec:
+      channel: stable-4.14
+      clusterID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+      upstream: 'https://api.openshift.com/api/upgrades_info/v1/graph'
+status: {}

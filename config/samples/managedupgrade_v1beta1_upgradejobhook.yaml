@@ -1,12 +1,6 @@
 apiVersion: managedupgrade.appuio.io/v1beta1
 kind: UpgradeJobHook
 metadata:
-  labels:
-    app.kubernetes.io/name: upgradejobhook
-    app.kubernetes.io/instance: upgradejobhook-sample
-    app.kubernetes.io/part-of: openshift-upgrade-controller
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: openshift-upgrade-controller
   name: upgradejobhook-sample
 spec:
   events:

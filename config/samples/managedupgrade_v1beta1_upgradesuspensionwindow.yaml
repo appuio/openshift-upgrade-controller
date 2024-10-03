@@ -1,0 +1,10 @@
+apiVersion: managedupgrade.appuio.io/v1beta1
+kind: UpgradeSuspensionWindow
+metadata:
+  name: upgradesuspensionwindow-sample
+spec:
+  start: "2024-10-08T08:00:00Z"
+  end:  "2034-10-08T08:00:00Z"
+  reason: "I'm tired of upgrades"
+  configSelector: {}
+  jobSelector: {}
