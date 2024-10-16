@@ -86,7 +86,7 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	jobSchedRequeue, schedErr := r.scheduleJob(ctx, &uc, sched, location)
 	statusRequeue, stErr := r.updateNextPossibleSchedulesStatus(ctx, &uc, sched, location)
-	if err := multierr.Append(schedErr, stErr); err != nil {
+	if err := multierr.Combine(schedErr, stErr); err != nil {
 		return ctrl.Result{}, err
 	}
 
