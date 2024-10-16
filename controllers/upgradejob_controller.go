@@ -877,13 +877,19 @@ func findTrackedHookJob(ujhookName, event string, uj managedupgradev1beta1.Upgra
 // It sets a timeout condition and returns an error if the delay is expired.
 // It also returns an error if the machine config pools cannot be listed or updated.
 func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, ensureUnpause bool) error {
+	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.pauseUnpauseMachineConfigPools")
+
 	var controllerManagesPools bool
 	var controllerPausedPools bool
 	for _, pool := range uj.Spec.MachineConfigPools {
 		if pool.DelayUpgrade == (managedupgradev1beta1.UpgradeJobMachineConfigPoolDelayUpgradeSpec{}) {
 			continue
 		}
-		shouldPause := !ensureUnpause && r.timeSinceStartAfter(uj) < pool.DelayUpgrade.DelayMin.Duration
+		timeSinceStart := r.timeSinceStartAfter(uj)
+		beforeMinDelay := timeSinceStart < pool.DelayUpgrade.DelayMin.Duration
+		shouldPause := !ensureUnpause && beforeMinDelay
+		l = l.WithValues("poolconfig_matchLabels", pool.MatchLabels, "shouldPause", shouldPause, "beforeMinDelay", beforeMinDelay, "ensureUnpause", ensureUnpause, "timeSinceStart", timeSinceStart)
+
 		sel, err := metav1.LabelSelectorAsSelector(pool.MatchLabels)
 		if err != nil {
 			return fmt.Errorf("failed to parse machine config pool selector: %w", err)
@@ -895,10 +901,11 @@ func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Contex
 			return fmt.Errorf("failed to list machine config pools %q: %w", pool.MatchLabels, err)
 		}
 		for _, mcp := range mcpl.Items {
+			l = l.WithValues("pool", mcp.Name, "paused", mcp.Spec.Paused)
 			controllerManagesPools = true
 			controllerPausedPools = controllerPausedPools || shouldPause
 			// optional delay expiry
-			if mcp.Spec.Paused && !shouldPause && pool.DelayUpgrade.DelayMax.Duration > 0 && r.timeSinceStartAfter(uj) >= pool.DelayUpgrade.DelayMax.Duration {
+			if mcp.Spec.Paused && !shouldPause && pool.DelayUpgrade.DelayMax.Duration > 0 && timeSinceStart >= pool.DelayUpgrade.DelayMax.Duration {
 				r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 					Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
 					Status:  metav1.ConditionTrue,
@@ -906,9 +913,12 @@ func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Contex
 					Message: fmt.Sprintf("unpausing of pool %q expired", mcp.Name),
 				})
 				// always return an error so the current reconcile is stopped and requeued
-				return multierr.Append(fmt.Errorf("unpausing of pool %q expired", mcp.Name), r.Status().Update(ctx, uj))
+				err := fmt.Errorf("unpausing of pool %q expired", mcp.Name)
+				l.Error(err, "unpausing of pool expired", "maxDelay", pool.DelayUpgrade.DelayMax.Duration)
+				return multierr.Combine(err, r.Status().Update(ctx, uj))
 			}
 			if mcp.Spec.Paused != shouldPause {
+				l.Info("Updating machine config pools pause field", "from", mcp.Spec.Paused, "to", shouldPause)
 				mcp.Spec.Paused = shouldPause
 				if err := r.Update(ctx, &mcp); err != nil {
 					return fmt.Errorf("failed to pause/unpause machine config pool %q: %w", mcp.Name, err)
