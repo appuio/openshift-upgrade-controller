@@ -9,7 +9,7 @@ require github.com/openshift/api v0.0.0-20240729140855-0a58f8c30a8c // release-4
 require (
 	dario.cat/mergo v1.0.1
 	github.com/Masterminds/semver/v3 v3.3.0
-	github.com/prometheus/client_golang v1.20.4
+	github.com/prometheus/client_golang v1.20.5
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/multierr v1.11.0
