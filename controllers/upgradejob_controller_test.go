@@ -168,7 +168,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
 		require.NoError(t, c.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
-		lock, ok := ucv.Annotations[ClusterVersionLockAnnotation]
+		lock, ok := ucv.Annotations[JobLockAnnotation]
 		require.True(t, ok, "lock annotation must be set")
 		require.Equal(t, upgradeJob.Namespace+"/"+upgradeJob.Name, lock, "lock annotation must contain upgrade job reference")
 	})
@@ -295,7 +295,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err)
 		require.NoError(t, c.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
-		require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+		require.Empty(t, ucv.Annotations[JobLockAnnotation], "should clear lock annotation")
 		_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 		require.NoError(t, err, "should ignore requests if cluster version is not locked")
 	})
@@ -425,7 +425,7 @@ func Test_UpgradeJobReconciler_Reconcile_Skipped_Job(t *testing.T) {
 
 		require.NoError(t, c.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
 		require.Empty(t, ucv.Spec.DesiredUpdate, "cluster version should not be updated")
-		require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "cluster version should not be locked")
+		require.Empty(t, ucv.Annotations[JobLockAnnotation], "cluster version should not be locked")
 	})
 
 	step(t, "`Success` and `Finish` hooks", func(t *testing.T) {
@@ -969,7 +969,7 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 	require.NotNil(t, failedCond, "should set failed condition")
 	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonUpgradeWithdrawn, failedCond.Reason)
 	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
-	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+	require.Empty(t, ucv.Annotations[JobLockAnnotation], "should clear lock annotation")
 }
 
 func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
@@ -1024,7 +1024,7 @@ func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
 	require.NotNil(t, failedCond, "should set failed condition")
 	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonTimedOut, failedCond.Reason)
 	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
-	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+	require.Empty(t, ucv.Annotations[JobLockAnnotation], "should clear lock annotation")
 }
 
 func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
@@ -1088,7 +1088,7 @@ func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
 	require.NotNil(t, failedCond, "should set failed condition")
 	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonPreHealthCheckFailed, failedCond.Reason)
 	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
-	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+	require.Empty(t, ucv.Annotations[JobLockAnnotation], "should clear lock annotation")
 }
 
 func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
@@ -1161,7 +1161,7 @@ func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
 	require.NotNil(t, failedCond, "should set failed condition")
 	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonPostHealthCheckFailed, failedCond.Reason)
 	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
-	require.Empty(t, ucv.Annotations[ClusterVersionLockAnnotation], "should clear lock annotation")
+	require.Empty(t, ucv.Annotations[JobLockAnnotation], "should clear lock annotation")
 }
 
 func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) {
@@ -1544,7 +1544,7 @@ func Test_JobFromClusterVersionHandler(t *testing.T) {
 	require.Len(t, subject(context.Background(), nil), 0, "should not return a reconcile request if clusterversion is not locked")
 
 	ucv.Annotations = map[string]string{
-		ClusterVersionLockAnnotation: "ns/upgrade-1234-4-5-13",
+		JobLockAnnotation: "ns/upgrade-1234-4-5-13",
 	}
 	require.NoError(t, client.Update(context.Background(), ucv))
 
