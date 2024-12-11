@@ -15,9 +15,9 @@ require (
 	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f
 	golang.org/x/mod v0.22.0
-	k8s.io/api v0.31.2
-	k8s.io/apimachinery v0.31.2
-	k8s.io/client-go v0.31.2
+	k8s.io/api v0.31.4
+	k8s.io/apimachinery v0.31.4
+	k8s.io/client-go v0.31.4
 	sigs.k8s.io/controller-runtime v0.19.1
 	sigs.k8s.io/controller-tools v0.16.5
 	sigs.k8s.io/kustomize/kustomize/v5 v5.5.0
