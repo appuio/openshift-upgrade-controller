@@ -393,6 +393,11 @@ func (in *UpgradeConfigSpec) DeepCopyInto(out *UpgradeConfigSpec) {
 	out.PinVersionWindow = in.PinVersionWindow
 	out.MaxSchedulingDelay = in.MaxSchedulingDelay
 	out.MaxUpgradeStartDelay = in.MaxUpgradeStartDelay
+	if in.SuccessfulJobsHistoryLimit != nil {
+		in, out := &in.SuccessfulJobsHistoryLimit, &out.SuccessfulJobsHistoryLimit
+		*out = new(int)
+		**out = **in
+	}
 	in.JobTemplate.DeepCopyInto(&out.JobTemplate)
 }
 

@@ -24,9 +24,23 @@ type UpgradeConfigSpec struct {
 	// +kubebuilder:validation:Format=duration
 	// +kubebuilder:default:="1h"
 	MaxUpgradeStartDelay metav1.Duration `json:"maxUpgradeStartDelay"`
+	// SuccessfulJobsHistoryLimit is the number of successful jobs to keep.
+	// A value smaller or equal to zero indicates no limit.
+	// It is not possible to remove the most recent job.
+	// Defaults to 4 if not set.
+	// +optional
+	SuccessfulJobsHistoryLimit *int `json:"successfulJobsHistoryLimit,omitempty"`
 
 	// JobTemplate defines the template for the upgrade job
 	JobTemplate UpgradeConfigJobTemplate `json:"jobTemplate"`
+}
+
+// GetSuccessfulJobsHistoryLimit returns the number of successful jobs to keep. Defaults to 3 if not set.
+func (in UpgradeConfigSpec) GetSuccessfulJobsHistoryLimit() int {
+	if in.SuccessfulJobsHistoryLimit == nil {
+		return 4
+	}
+	return *in.SuccessfulJobsHistoryLimit
 }
 
 // UpgradeConfigJobTemplate defines the desired state of UpgradeJob

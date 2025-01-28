@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -10,10 +11,13 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
@@ -407,6 +411,109 @@ func requireEventMatches(t *testing.T, recorder *record.FakeRecorder, substrings
 	}
 
 	require.NotEmpty(t, matchingEvent, "no event matches %v, got %v", substrings, events)
+}
+
+func Test_UpgradeConfigReconciler_Reconcile_CleanupSuccessfulJobs(t *testing.T) {
+	ctx := context.Background()
+	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.UTC)}
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+	}
+
+	upgradeConfig := &managedupgradev1beta1.UpgradeConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "daily-maintenance",
+			Namespace:         "appuio-openshift-upgrade-controller",
+			CreationTimestamp: metav1.Time{Time: clock.Now().Add(-time.Hour)},
+		},
+		Spec: managedupgradev1beta1.UpgradeConfigSpec{
+			Schedule: managedupgradev1beta1.UpgradeConfigSchedule{
+				Cron: "0 22 * * *", // At 22:00 every day
+			},
+			SuccessfulJobsHistoryLimit: ptr.To(2),
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeConfig)
+
+	jobStartTs := []time.Time{
+		clock.Now().Add(-24 * time.Hour * 1),
+		clock.Now().Add(-24 * time.Hour * 2),
+		clock.Now().Add(-24 * time.Hour * 3),
+	}
+
+	for _, ts := range jobStartTs {
+		job := &managedupgradev1beta1.UpgradeJob{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("job-%d", ts.Unix()),
+				Namespace: upgradeConfig.Namespace,
+			},
+			Spec: managedupgradev1beta1.UpgradeJobSpec{
+				StartAfter: metav1.NewTime(ts),
+			},
+		}
+		{
+			successfulOwned := job.DeepCopy()
+			successfulOwned.Name = "successful-owned-" + successfulOwned.Name
+			require.NoError(t, controllerutil.SetControllerReference(upgradeConfig, successfulOwned, client.Scheme()))
+			require.NoError(t, client.Create(ctx, successfulOwned))
+			apimeta.SetStatusCondition(&successfulOwned.Status.Conditions, metav1.Condition{
+				Type:   managedupgradev1beta1.UpgradeJobConditionSucceeded,
+				Status: metav1.ConditionTrue,
+			})
+			require.NoError(t, client.Status().Update(ctx, successfulOwned))
+		}
+		{
+			notSuccessfulOwned := job.DeepCopy()
+			notSuccessfulOwned.Name = "not-successful-owned-" + notSuccessfulOwned.Name
+			require.NoError(t, controllerutil.SetControllerReference(upgradeConfig, notSuccessfulOwned, client.Scheme()))
+			require.NoError(t, client.Create(ctx, notSuccessfulOwned))
+		}
+		{
+			successfulNotOwned := job.DeepCopy()
+			successfulNotOwned.Name = "successful-not-owned-" + successfulNotOwned.Name
+			require.NoError(t, client.Create(ctx, successfulNotOwned))
+			apimeta.SetStatusCondition(&successfulNotOwned.Status.Conditions, metav1.Condition{
+				Type:   managedupgradev1beta1.UpgradeJobConditionSucceeded,
+				Status: metav1.ConditionTrue,
+			})
+			require.NoError(t, client.Status().Update(ctx, successfulNotOwned))
+		}
+	}
+
+	recorder := record.NewFakeRecorder(5)
+	subject := &UpgradeConfigReconciler{
+		Client:   client,
+		Scheme:   client.Scheme(),
+		Recorder: recorder,
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	_, err := subject.Reconcile(ctx, requestForObject(upgradeConfig))
+	require.NoError(t, err)
+
+	var nj managedupgradev1beta1.UpgradeJobList
+	require.NoError(t, client.List(ctx, &nj))
+	names := make([]string, 0, len(nj.Items))
+	for _, j := range nj.Items {
+		names = append(names, j.Name)
+	}
+	require.ElementsMatch(t, names, []string{
+		"not-successful-owned-job-1648800000",
+		"not-successful-owned-job-1648886400",
+		"not-successful-owned-job-1648972800",
+		"successful-not-owned-job-1648800000",
+		"successful-not-owned-job-1648886400",
+		"successful-not-owned-job-1648972800",
+		"successful-owned-job-1648886400",
+		"successful-owned-job-1648972800",
+	}, "only owned and successful jobs should be cleaned up, and only the oldest ones")
 }
 
 // requireTimeEqual asserts that two times are equal, ignoring their timezones.

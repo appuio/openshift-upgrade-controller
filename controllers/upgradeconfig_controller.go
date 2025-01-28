@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,8 @@ type UpgradeConfigReconciler struct {
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradesuspensionwindows,verbs=get;list;watch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradesuspensionwindows/status,verbs=get
 
+//+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs,verbs=get;list;watch;create;update;patch;delete
+
 // Reconcile implements the reconcile loop for UpgradeConfig.
 // It schedules UpgradeJobs based on the UpgradeConfig's schedule - if an update is available.
 func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -86,7 +89,8 @@ func (r *UpgradeConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	jobSchedRequeue, schedErr := r.scheduleJob(ctx, &uc, sched, location)
 	statusRequeue, stErr := r.updateNextPossibleSchedulesStatus(ctx, &uc, sched, location)
-	if err := multierr.Combine(schedErr, stErr); err != nil {
+	cleanupErr := r.cleanupSuccessfulJobs(ctx, &uc)
+	if err := multierr.Combine(schedErr, stErr, cleanupErr); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -193,6 +197,40 @@ findNextRun:
 	}
 
 	return 0, r.setLastScheduledUpgrade(ctx, uc, nextRun)
+}
+
+func (r *UpgradeConfigReconciler) cleanupSuccessfulJobs(ctx context.Context, uc *managedupgradev1beta1.UpgradeConfig) error {
+	l := log.FromContext(ctx).WithName("UpgradeConfigReconciler.cleanupSuccessfulJobs")
+
+	jobs, err := r.getControlledJobs(ctx, uc)
+	if err != nil {
+		return fmt.Errorf("could not get controlled jobs: %w", err)
+	}
+
+	successfulJobs := make([]managedupgradev1beta1.UpgradeJob, 0, len(jobs))
+	for _, job := range jobs {
+		if apimeta.IsStatusConditionTrue(job.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded) {
+			successfulJobs = append(successfulJobs, job)
+		}
+	}
+
+	slices.SortFunc(successfulJobs, func(a, b managedupgradev1beta1.UpgradeJob) int {
+		return b.Spec.StartAfter.Time.Compare(a.Spec.StartAfter.Time)
+	})
+
+	var delErrs []error
+	limit := uc.Spec.GetSuccessfulJobsHistoryLimit()
+	if limit > 0 && len(successfulJobs) > limit {
+		for _, job := range successfulJobs[limit:] {
+			l.Info("deleting successful job", "job", job.Name)
+			delErrs = append(delErrs, r.Delete(ctx, &job))
+		}
+	}
+	if err := multierr.Combine(delErrs...); err != nil {
+		return fmt.Errorf("could not delete jobs: %w", err)
+	}
+
+	return nil
 }
 
 func (r *UpgradeConfigReconciler) setLastScheduledUpgrade(ctx context.Context, uc *managedupgradev1beta1.UpgradeConfig, t time.Time) error {
