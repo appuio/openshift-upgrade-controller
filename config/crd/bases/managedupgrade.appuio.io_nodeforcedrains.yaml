@@ -1,0 +1,117 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: nodeforcedrains.managedupgrade.appuio.io
+spec:
+  group: managedupgrade.appuio.io
+  names:
+    kind: NodeForceDrain
+    listKind: NodeForceDrainList
+    plural: nodeforcedrains
+    singular: nodeforcedrain
+  scope: Namespaced
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: NodeForceDrain is the Schema for the NodeForceDrains API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NodeForceDrainSpec defines the desired state of NodeForceDrain
+            properties:
+              nodeDrainGracePeriod:
+                description: |-
+                  NodeDrainGracePeriod is the duration until the controller starts to delete pods on the node.
+                  The duration is calculated from the OpenShist node drain annotation.
+                  This circumvents the eviction API and means that PDBs are ignored.
+                  This is not a force delete, but it will delete pods that are not managed by a controller.
+                  A zero value disables the force drain.
+                type: string
+              nodeSelector:
+                description: |-
+                  NodeSelector is a selector to select which nodes to drain
+                  A nil selector matches no nodes, while an empty selector matches all nodes.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              podForceDeleteGracePeriod:
+                description: |-
+                  PodForceDeleteGracePeriod is the duration until the controller starts to force delete pods on the node.
+                  The duration is calculated from the pods deletion timestamp.
+                  This is equivalent to the `--force --grace-period=0` flag of `kubectl delete pod`.
+                  A zero value disables the force delete.
+                type: string
+            required:
+            - nodeDrainGracePeriod
+            - nodeSelector
+            - podForceDeleteGracePeriod
+            type: object
+          status:
+            description: NodeForceDrainStatus defines the observed state of NodeForceDrain
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
