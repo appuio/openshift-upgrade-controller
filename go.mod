@@ -2,7 +2,7 @@ module github.com/appuio/openshift-upgrade-controller
 
 go 1.23.0
 
-toolchain go1.23.6
+toolchain go1.24.0
 
 require github.com/openshift/api v0.0.0-20240729140855-0a58f8c30a8c // release-4.15
 
