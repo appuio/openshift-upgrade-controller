@@ -45,6 +45,8 @@ import (
 type NodeForceDrainReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	Clock Clock
 }
 
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
@@ -106,6 +108,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
+	var timeUntilNextDrain time.Duration
 	nodesOutOfGracePeriod := make([]corev1.Node, 0, len(drainingNodes))
 	for _, node := range drainingNodes {
 		ld, found := findLastObservedNodeDrain(fd.Status, node.Name)
@@ -113,7 +116,12 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			l.Info("Node was not found in status. Skipping", "node", node.Name)
 			continue
 		}
-		if time.Now().Before(ld.ObservedTime.Add(fd.Spec.NodeDrainGracePeriod.Duration)) {
+
+		timeUntilDrain := ld.ObservedTime.Time.Sub(r.Clock.Now()) + fd.Spec.NodeDrainGracePeriod.Duration
+		if timeUntilDrain >= 0 {
+			if timeUntilNextDrain == 0 || timeUntilDrain < timeUntilNextDrain {
+				timeUntilNextDrain = timeUntilDrain
+			}
 			l.Info("Node is still in grace period", "node", node.Name, "lastObservedNodeDrain", ld)
 			continue
 		}
@@ -134,12 +142,15 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
+	var timeUntilNextPodForceDelete time.Duration
 	if pfd := fd.Spec.PodForceDeleteGracePeriod.Duration; pfd != 0 {
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force deleting pods on node", "node", node.Name)
-			if err := r.forceDeletePodsOnNode(ctx, node, pfd); err != nil {
+			if t, err := r.forceDeletePodsOnNode(ctx, node, pfd); err != nil {
 				errors = append(errors, fmt.Errorf("failed to force delete pods on node %s: %w", node.Name, err))
+			} else if t >= 0 && (timeUntilNextPodForceDelete == 0 || t < timeUntilNextPodForceDelete) {
+				timeUntilNextPodForceDelete = t
 			}
 		}
 		if err := multierr.Combine(errors...); err != nil {
@@ -147,7 +158,11 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	return ctrl.Result{}, nil
+	requeueAfter := timeUntilNextDrain
+	if timeUntilNextPodForceDelete >= 0 && (requeueAfter == 0 || timeUntilNextPodForceDelete < requeueAfter) {
+		requeueAfter = timeUntilNextPodForceDelete
+	}
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 // findLastObservedNodeDrain finds the last observed node drain in the status.
@@ -203,20 +218,28 @@ func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node core
 	return multierr.Combine(deletionErrs...)
 }
 
-func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, node corev1.Node, gracePeriod time.Duration) error {
+// forceDeletePodsOnNode deletes all pods on the node.
+// Returns the time until the next force delete and any errors that occurred.
+// A time of 0 means that there are no pods to force delete.
+func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, node corev1.Node, gracePeriod time.Duration) (time.Duration, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.forceDeletePodsOnNode").WithValues("node", node.Name)
 
 	pods, err := r.getDeletionCandidatePodsForNode(ctx, node)
 	if err != nil {
-		return fmt.Errorf("failed to get deletion candidate pods for node %s: %w", node.Name, err)
+		return 0, fmt.Errorf("failed to get deletion candidate pods for node %s: %w", node.Name, err)
 	}
 
+	var timeUntilNextForceDelete time.Duration
 	deletionErrs := make([]error, 0, len(pods))
 	for _, pod := range pods {
 		if pod.DeletionTimestamp == nil {
 			continue
 		}
-		if time.Now().Before(pod.DeletionTimestamp.Add(gracePeriod)) {
+		timeUntilForceDelete := pod.DeletionTimestamp.Sub(r.Clock.Now()) + gracePeriod
+		if timeUntilForceDelete >= 0 {
+			if timeUntilNextForceDelete == 0 || timeUntilForceDelete < timeUntilNextForceDelete {
+				timeUntilNextForceDelete = timeUntilForceDelete
+			}
 			l.Info("Pod is still in grace period", "pod", pod.Name, "deletionTimestamp", pod.DeletionTimestamp, "gracePeriod", gracePeriod)
 		}
 
@@ -228,7 +251,7 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 		}
 	}
 
-	return multierr.Combine(deletionErrs...)
+	return timeUntilNextForceDelete, multierr.Combine(deletionErrs...)
 }
 
 // getDeletionCandidatePodsForNode returns a list of pods on the node that are not controlled by an active DaemonSet.
