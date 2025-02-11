@@ -99,6 +99,8 @@ spec:
                 description: |-
                   PodForceDeleteGracePeriod is the duration until the controller starts to force delete pods on the node.
                   The duration is calculated from the pods deletion timestamp.
+                  Only pods on nodes that have reached the nodeDrainGracePeriod are force deleted.
+                  The maximum time until pod force deletion is nodeDrainGracePeriod+podForceDeleteGracePeriod.
                   This is equivalent to the `--force --grace-period=0` flag of `kubectl delete pod`.
                   A zero value disables the force delete.
                 type: string
@@ -109,6 +111,29 @@ spec:
             type: object
           status:
             description: NodeForceDrainStatus defines the observed state of NodeForceDrain
+            properties:
+              lastObservedNodeDrain:
+                description: LastObservedNodeDrain is the last time the controller
+                  observed a node drain.
+                items:
+                  properties:
+                    drainID:
+                      description: |-
+                        LastAppliedDrain is a unique identifier for the drain.
+                        Taken from the machineconfiguration.openshift.io/lastAppliedDrain annotation.
+                      type: string
+                    nodeName:
+                      description: NodeName is the name of the node that was drained.
+                      type: string
+                    observedTime:
+                      format: date-time
+                      type: string
+                  required:
+                  - drainID
+                  - nodeName
+                  - observedTime
+                  type: object
+                type: array
             type: object
         type: object
     served: true
