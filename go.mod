@@ -9,6 +9,7 @@ require github.com/openshift/api v0.0.0-20240729140855-0a58f8c30a8c // release-4
 require (
 	dario.cat/mergo v1.0.1
 	github.com/Masterminds/semver/v3 v3.3.1
+	github.com/go-logr/logr v1.4.2
 	github.com/prometheus/client_golang v1.20.5
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.10.0
@@ -36,7 +37,6 @@ require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
-	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.21.0 // indirect
