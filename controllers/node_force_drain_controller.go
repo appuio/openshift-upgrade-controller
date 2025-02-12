@@ -22,7 +22,6 @@ import (
 	"slices"
 	"time"
 
-	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -37,6 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 )
 
 // NodeForceDrainReconciler reconciles the NodeForceDrain object
@@ -44,9 +45,18 @@ import (
 // It force drains nodes after a certain period of time.
 type NodeForceDrainReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	// APIReader is used to read objects directly from the API.
+	// It is used to avoid caching all pods in the controller.
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
 
 	Clock Clock
+
+	// MaxReconcileIntervalDuringActiveDrain is the longest possible interval at which the controller reconciles during active node drains.
+	// It is used to guard against edge cases where the controller might miss a pod deletion.
+	// One example would be if a daemon set orphans a pod after the controller has reconciled.
+	// It will also guard against any logic errors in the controller.
+	MaxReconcileIntervalDuringActiveDrain time.Duration
 }
 
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
@@ -80,6 +90,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
+	// Check for draining nodes, using the node drainer annotations.
 	drainingNodes := make([]corev1.Node, 0, len(nodes.Items))
 	for _, node := range nodes.Items {
 		l := l.WithValues("node", node.Name)
@@ -96,18 +107,21 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	l.Info("Draining nodes", "nodes", drainingNodes)
 
+	// Update the last observed node drains for nodes that started draining.
 	statusChanged := false
 	for _, node := range drainingNodes {
-		statusChanged = statusChanged || setLastObservedNodeDrain(&fd, node.Name, node.Annotations[LastAppliedDrainerAnnotationKey])
+		statusChanged = statusChanged || r.setLastObservedNodeDrain(&fd, node.Name, node.Annotations[LastAppliedDrainerAnnotationKey])
 	}
 	if statusChanged {
 		l.Info("Observed new node drain timestamps", "lastObservedNodeDrains", fd.Status.LastObservedNodeDrain)
 		if err := r.Status().Update(ctx, &fd); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to update LastObservedNodeDrain status: %w", err)
 		}
+		// We can return early here because the status update will trigger a new reconcile.
 		return ctrl.Result{}, nil
 	}
 
+	// Check if any nodes are out of the grace period.
 	var timeUntilNextDrain time.Duration
 	nodesOutOfGracePeriod := make([]corev1.Node, 0, len(drainingNodes))
 	for _, node := range drainingNodes {
@@ -118,7 +132,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 
 		timeUntilDrain := ld.ObservedTime.Time.Sub(r.Clock.Now()) + fd.Spec.NodeDrainGracePeriod.Duration
-		if timeUntilDrain >= 0 {
+		if timeUntilDrain > 0 {
 			if timeUntilNextDrain == 0 || timeUntilDrain < timeUntilNextDrain {
 				timeUntilNextDrain = timeUntilDrain
 			}
@@ -129,38 +143,56 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		nodesOutOfGracePeriod = append(nodesOutOfGracePeriod, node)
 	}
 
+	// Force drain nodes by deleting all pods on the node.
+	var forceDrainError error
+	var didDeletePod bool
 	if fd.Spec.NodeDrainGracePeriod.Duration != 0 {
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force draining node", "node", node.Name)
-			if err := r.forceDrainNode(ctx, node); err != nil {
+			deleted, err := r.forceDrainNode(ctx, node)
+			if deleted {
+				didDeletePod = true
+			}
+			if err != nil {
 				errors = append(errors, fmt.Errorf("failed to force drain node %s: %w", node.Name, err))
 			}
 		}
-		if err := multierr.Combine(errors...); err != nil {
-			return ctrl.Result{}, err
-		}
+		forceDrainError = multierr.Combine(errors...)
 	}
 
+	// Force delete pods on nodes that are out of the grace period.
 	var timeUntilNextPodForceDelete time.Duration
+	var forceDeleteError error
 	if pfd := fd.Spec.PodForceDeleteGracePeriod.Duration; pfd != 0 {
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force deleting pods on node", "node", node.Name)
 			if t, err := r.forceDeletePodsOnNode(ctx, node, pfd); err != nil {
 				errors = append(errors, fmt.Errorf("failed to force delete pods on node %s: %w", node.Name, err))
-			} else if t >= 0 && (timeUntilNextPodForceDelete == 0 || t < timeUntilNextPodForceDelete) {
+			} else if t > 0 && (timeUntilNextPodForceDelete == 0 || t < timeUntilNextPodForceDelete) {
 				timeUntilNextPodForceDelete = t
 			}
 		}
-		if err := multierr.Combine(errors...); err != nil {
-			return ctrl.Result{}, err
-		}
+		forceDeleteError = multierr.Combine(errors...)
 	}
 
+	if err := multierr.Combine(forceDrainError, forceDeleteError); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Requeue after the time until the next timeout.
+	// This timeout can be due to node grace periods or pod force delete grace periods.
 	requeueAfter := timeUntilNextDrain
-	if timeUntilNextPodForceDelete >= 0 && (requeueAfter == 0 || timeUntilNextPodForceDelete < requeueAfter) {
+	if didDeletePod && fd.Spec.PodForceDeleteGracePeriod.Duration != 0 && (requeueAfter == 0 || fd.Spec.PodForceDeleteGracePeriod.Duration < requeueAfter) {
+		requeueAfter = fd.Spec.PodForceDeleteGracePeriod.Duration
+	}
+	if timeUntilNextPodForceDelete > 0 && (requeueAfter == 0 || timeUntilNextPodForceDelete < requeueAfter) {
 		requeueAfter = timeUntilNextPodForceDelete
+	}
+	// Ensure we respect the maximum reconcile interval during active node drains.
+	if len(drainingNodes) > 0 && r.MaxReconcileIntervalDuringActiveDrain > 0 && (requeueAfter == 0 || requeueAfter > r.MaxReconcileIntervalDuringActiveDrain) {
+		requeueAfter = r.MaxReconcileIntervalDuringActiveDrain
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
@@ -179,7 +211,7 @@ func findLastObservedNodeDrain(fd managedupgradev1beta1.NodeForceDrainStatus, no
 // setLastObservedNodeDrain sets the last observed node drain in the status.
 // It does not update the status.
 // Returns true if the status was updated.
-func setLastObservedNodeDrain(fd *managedupgradev1beta1.NodeForceDrain, nodeName, drainID string) bool {
+func (r *NodeForceDrainReconciler) setLastObservedNodeDrain(fd *managedupgradev1beta1.NodeForceDrain, nodeName, drainID string) bool {
 	i := slices.IndexFunc(fd.Status.LastObservedNodeDrain, func(o managedupgradev1beta1.ObservedNodeDrain) bool {
 		return o.NodeName == nodeName
 	})
@@ -187,7 +219,7 @@ func setLastObservedNodeDrain(fd *managedupgradev1beta1.NodeForceDrain, nodeName
 		fd.Status.LastObservedNodeDrain = append(fd.Status.LastObservedNodeDrain, managedupgradev1beta1.ObservedNodeDrain{
 			NodeName:         nodeName,
 			LastAppliedDrain: drainID,
-			ObservedTime:     metav1.Now(),
+			ObservedTime:     metav1.Time{Time: r.Clock.Now()},
 		})
 		return true
 	}
@@ -195,27 +227,34 @@ func setLastObservedNodeDrain(fd *managedupgradev1beta1.NodeForceDrain, nodeName
 		return false
 	}
 	fd.Status.LastObservedNodeDrain[i].LastAppliedDrain = drainID
-	fd.Status.LastObservedNodeDrain[i].ObservedTime = metav1.Now()
+	fd.Status.LastObservedNodeDrain[i].ObservedTime = metav1.Time{Time: r.Clock.Now()}
 	return true
 }
 
-func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node corev1.Node) error {
+// forceDrainNode deletes all pods on the node.
+// Returns true if there was an attempt to delete a pod and any errors that occurred.
+func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node corev1.Node) (bool, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.forceDrainNode").WithValues("node", node.Name)
 
 	pods, err := r.getDeletionCandidatePodsForNode(ctx, node)
 	if err != nil {
-		return fmt.Errorf("failed to get deletion candidate pods for node %s: %w", node.Name, err)
+		return false, fmt.Errorf("failed to get deletion candidate pods for node %s: %w", node.Name, err)
 	}
 
+	var attemptedDeletion bool
 	deletionErrs := make([]error, 0, len(pods))
 	for _, pod := range pods {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
 		l.Info("Deleting pod", "pod", pod.Name)
+		attemptedDeletion = true
 		if err := r.Delete(ctx, &pod); err != nil {
 			deletionErrs = append(deletionErrs, err)
 		}
 	}
 
-	return multierr.Combine(deletionErrs...)
+	return attemptedDeletion, multierr.Combine(deletionErrs...)
 }
 
 // forceDeletePodsOnNode deletes all pods on the node.
@@ -236,11 +275,12 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 			continue
 		}
 		timeUntilForceDelete := pod.DeletionTimestamp.Sub(r.Clock.Now()) + gracePeriod
-		if timeUntilForceDelete >= 0 {
+		if timeUntilForceDelete > 0 {
 			if timeUntilNextForceDelete == 0 || timeUntilForceDelete < timeUntilNextForceDelete {
 				timeUntilNextForceDelete = timeUntilForceDelete
 			}
 			l.Info("Pod is still in grace period", "pod", pod.Name, "deletionTimestamp", pod.DeletionTimestamp, "gracePeriod", gracePeriod)
+			continue
 		}
 
 		l.Info("Force deleting pod", "pod", pod.Name)
@@ -256,20 +296,18 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 
 // getDeletionCandidatePodsForNode returns a list of pods on the node that are not controlled by an active DaemonSet.
 // Pods controlled by an active DaemonSet are not returned.
-// Only pod metadata is returned.
-func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.Context, node corev1.Node) ([]metav1.PartialObjectMetadata, error) {
+func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.Context, node corev1.Node) ([]corev1.Pod, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.getDeletionCandidatePodsForNode").WithValues("node", node.Name)
 
-	var pods metav1.PartialObjectMetadataList
-	pods.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("PodList"))
-
-	if err := r.List(ctx, &pods, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
+	// We use the API directly to avoid caching all pods in the controller.
+	var pods corev1.PodList
+	if err := r.APIReader.List(ctx, &pods, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
 		return nil, fmt.Errorf("failed to list pods on node %s: %w", node.Name, err)
 	}
 
-	filteredPods := make([]metav1.PartialObjectMetadata, 0, len(pods.Items))
+	filteredPods := make([]corev1.Pod, 0, len(pods.Items))
 	for _, pod := range pods.Items {
-		controlledByActiveDaemonSet, err := r.podIsControlledByActiveDaemonSet(ctx, pod)
+		controlledByActiveDaemonSet, err := r.podIsControlledByExistingDaemonSet(ctx, pod)
 		if err != nil {
 			l.Error(err, "Failed to check if pod is controlled by active DaemonSet", "pod", pod.Name)
 			continue
@@ -285,7 +323,9 @@ func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.C
 	return filteredPods, nil
 }
 
-func (r *NodeForceDrainReconciler) podIsControlledByActiveDaemonSet(ctx context.Context, pod metav1.PartialObjectMetadata) (bool, error) {
+// podIsControlledByExistingDaemonSet returns true if the pod is controlled by an existing DaemonSet.
+// This is determined by checking if the pod's controller is a DaemonSet and if the DaemonSet exists in the API.
+func (r *NodeForceDrainReconciler) podIsControlledByExistingDaemonSet(ctx context.Context, pod corev1.Pod) (bool, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.podIsControlledByActiveDaemonSet")
 
 	controllerRef := metav1.GetControllerOf(&pod)
@@ -295,6 +335,7 @@ func (r *NodeForceDrainReconciler) podIsControlledByActiveDaemonSet(ctx context.
 	if controllerRef.APIVersion != "apps/v1" || controllerRef.Kind != "DaemonSet" {
 		return false, nil
 	}
+	// We don't need a full object, metadata is enough.
 	var ds metav1.PartialObjectMetadata
 	ds.SetGroupVersionKind(appsv1.SchemeGroupVersion.WithKind("DaemonSet"))
 	err := r.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: controllerRef.Name}, &ds)

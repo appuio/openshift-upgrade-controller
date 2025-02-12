@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 )
@@ -1598,11 +1601,53 @@ func controllerClient(t *testing.T, initObjs ...client.Object) client.WithWatch 
 			&managedupgradev1beta1.UpgradeJobHook{},
 			&managedupgradev1beta1.ClusterVersion{},
 			&managedupgradev1beta1.UpgradeSuspensionWindow{},
+			&managedupgradev1beta1.NodeForceDrain{},
 			&configv1.ClusterVersion{},
 			&batchv1.Job{},
 			&machineconfigurationv1.MachineConfigPool{},
 		).
+		WithIndex(&corev1.Pod{}, "spec.nodeName", nodeNameIndexer).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: stuckPodSimulator,
+		}).
 		Build()
+}
+
+const StuckPodSimulationFinalizer = "stuckPodSimulation"
+
+// stuckPodSimulator allows simulating a stuck pod by adding the StuckPodSimulationFinalizer to a pod.
+// The finalizer is then removed when the pod is deleted with a grace period of 0.
+func stuckPodSimulator(ctx context.Context, cli client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+	var delOpts client.DeleteOptions
+	for _, opt := range opts {
+		opt.ApplyToDelete(&delOpts)
+	}
+	_, isPod := obj.(*corev1.Pod)
+	if isPod && delOpts.GracePeriodSeconds != nil && *delOpts.GracePeriodSeconds == 0 {
+		var pod corev1.Pod
+		if err := cli.Get(ctx, client.ObjectKeyFromObject(obj), &pod); err != nil {
+			return fmt.Errorf("failed to get pod to remove finalizer: %w", err)
+		}
+		if controllerutil.RemoveFinalizer(&pod, StuckPodSimulationFinalizer) {
+			if err := cli.Update(ctx, &pod); err != nil {
+				return fmt.Errorf("failed to remove finalizer: %w", err)
+			}
+		}
+		// Pod already deleted, do not re-delete which would cause a 404
+		if pod.DeletionTimestamp != nil {
+			return nil
+		}
+	}
+
+	return cli.Delete(ctx, obj, opts...)
+}
+
+func nodeNameIndexer(obj client.Object) []string {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return []string{}
+	}
+	return []string{pod.Spec.NodeName}
 }
 
 func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent, fail bool) batchv1.Job {
