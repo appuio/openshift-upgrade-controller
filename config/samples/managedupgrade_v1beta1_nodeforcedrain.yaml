@@ -1,0 +1,10 @@
+apiVersion: managedupgrade.appuio.io/v1beta1
+kind: NodeForceDrain
+metadata:
+  name: node-role-app
+spec:
+  podForceDeleteGracePeriod: 2m
+  nodeDrainGracePeriod: 15m
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/app: ""
