@@ -152,7 +152,7 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 		require.Zero(t, res.RequeueAfter, "controller updates status so no need to requeue")
 
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(forceDrain), forceDrain))
-		require.Len(t, forceDrain.Status.LastObservedNodeDrain, 2, "controller should have one observed node drain")
+		require.Len(t, forceDrain.Status.LastObservedNodeDrain, 2, "controller should have two observed node drains")
 		require.Equal(t, forceDrain.Status.LastObservedNodeDrain[1].NodeName, node2.Name)
 		require.Equal(t, forceDrain.Status.LastObservedNodeDrain[1].LastAppliedDrain, "node2-drainer-1")
 		require.Equal(t, forceDrain.Status.LastObservedNodeDrain[1].ObservedTime.Time, clock.Now())
@@ -214,7 +214,7 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 		require.Zero(t, res.RequeueAfter)
 
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(forceDrain), forceDrain))
-		require.Len(t, forceDrain.Status.LastObservedNodeDrain, 2, "controller should have one observed node drain")
+		require.Len(t, forceDrain.Status.LastObservedNodeDrain, 2, "controller should still have two observed node drains")
 		require.Equal(t, forceDrain.Status.LastObservedNodeDrain[0].NodeName, node1.Name)
 		require.Equal(t, forceDrain.Status.LastObservedNodeDrain[0].LastAppliedDrain, "node1-drainer-2")
 		require.Equal(t, forceDrain.Status.LastObservedNodeDrain[0].ObservedTime.Time, clock.Now())
