@@ -274,7 +274,9 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 		if pod.DeletionTimestamp == nil {
 			continue
 		}
-		timeUntilForceDelete := pod.DeletionTimestamp.Sub(r.Clock.Now()) + gracePeriod
+		// Pod deletion timestamp is in the future and includes the grace period.
+		podGracePeriod := time.Duration(ptr.Deref(pod.ObjectMeta.DeletionGracePeriodSeconds, 0)) * time.Second
+		timeUntilForceDelete := pod.DeletionTimestamp.Sub(r.Clock.Now()) - podGracePeriod + gracePeriod
 		if timeUntilForceDelete > 0 {
 			if timeUntilNextForceDelete == 0 || timeUntilForceDelete < timeUntilNextForceDelete {
 				timeUntilNextForceDelete = timeUntilForceDelete
