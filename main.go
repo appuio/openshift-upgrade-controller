@@ -83,6 +83,9 @@ func main() {
 	flag.StringVar(&managedClusterVersionName, "managed-cluster-version-name", "version", "The name of the ClusterVersion object to manage.")
 	flag.StringVar(&managedClusterVersionNamespace, "managed-cluster-version-namespace", defaultNamespace, "The namespace of the ClusterVersion object to manage.")
 
+	var nodeDrainReconcileInterval time.Duration
+	flag.DurationVar(&nodeDrainReconcileInterval, "node-drain-reconcile-interval", 3*time.Minute, "The interval at which to reconcile the node force drainer during active node drains. This is a safety mechanism to guard against edge cases, such as daemonsets orphaning pods, or programming errors in the node force drainer. Set to zero to disable this safety mechanism.")
+
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -170,6 +173,18 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "UpgradeSuspensionWindow")
+		os.Exit(1)
+	}
+	if err = (&controllers.NodeForceDrainReconciler{
+		Client:    mgr.GetClient(),
+		APIReader: mgr.GetAPIReader(),
+		Scheme:    mgr.GetScheme(),
+
+		Clock: realClock{},
+
+		MaxReconcileIntervalDuringActiveDrain: nodeDrainReconcileInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "NodeForceDrainReconciler")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder
