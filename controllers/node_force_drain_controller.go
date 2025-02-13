@@ -105,7 +105,13 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		drainingNodes = append(drainingNodes, node)
 	}
-	l.Info("Draining nodes", "nodes", drainingNodes)
+	if len(drainingNodes) > 0 {
+		nodeNames := make([]string, 0, len(drainingNodes))
+		for _, node := range drainingNodes {
+			nodeNames = append(nodeNames, node.Name)
+		}
+		l.Info("Found draining nodes", "nodes", nodeNames)
+	}
 
 	// Update the last observed node drains for nodes that started draining.
 	statusChanged := false
@@ -136,7 +142,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			if timeUntilNextDrain == 0 || timeUntilDrain < timeUntilNextDrain {
 				timeUntilNextDrain = timeUntilDrain
 			}
-			l.Info("Node is still in grace period", "node", node.Name, "lastObservedNodeDrain", ld)
+			l.Info("Node is still in grace period", "node", node.Name, "lastObservedNodeDrain", ld, "nodeDrainGracePeriod", fd.Spec.NodeDrainGracePeriod, "timeUntilDrain", timeUntilDrain)
 			continue
 		}
 		l.Info("Node is out of grace period", "node", node.Name, "lastObservedNodeDrain", ld, "nodeDrainGracePeriod", fd.Spec.NodeDrainGracePeriod)
@@ -247,7 +253,7 @@ func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node core
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
-		l.Info("Deleting pod", "pod", pod.Name)
+		l.Info("Deleting pod", "pod", pod.Name, "podNamespace", pod.Namespace)
 		attemptedDeletion = true
 		if err := r.Delete(ctx, &pod); err != nil {
 			deletionErrs = append(deletionErrs, err)
@@ -271,6 +277,7 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 	var timeUntilNextForceDelete time.Duration
 	deletionErrs := make([]error, 0, len(pods))
 	for _, pod := range pods {
+		l := l.WithValues("pod", pod.Name, "podNamespace", pod.Namespace)
 		if pod.DeletionTimestamp == nil {
 			continue
 		}
@@ -281,11 +288,11 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 			if timeUntilNextForceDelete == 0 || timeUntilForceDelete < timeUntilNextForceDelete {
 				timeUntilNextForceDelete = timeUntilForceDelete
 			}
-			l.Info("Pod is still in grace period", "pod", pod.Name, "deletionTimestamp", pod.DeletionTimestamp, "gracePeriod", gracePeriod)
+			l.Info("Pod is still in grace period", "deletionTimestamp", pod.DeletionTimestamp, "gracePeriod", gracePeriod, "timeUntilForceDelete", timeUntilForceDelete)
 			continue
 		}
 
-		l.Info("Force deleting pod", "pod", pod.Name)
+		l.Info("Force deleting pod")
 		if err := r.Delete(ctx, &pod, &client.DeleteOptions{
 			GracePeriodSeconds: ptr.To(int64(0)),
 		}); err != nil {
@@ -309,13 +316,18 @@ func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.C
 
 	filteredPods := make([]corev1.Pod, 0, len(pods.Items))
 	for _, pod := range pods.Items {
+		l := l.WithValues("pod", pod.Name, "podNamespace", pod.Namespace)
 		controlledByActiveDaemonSet, err := r.podIsControlledByExistingDaemonSet(ctx, pod)
 		if err != nil {
-			l.Error(err, "Failed to check if pod is controlled by active DaemonSet", "pod", pod.Name)
+			l.Error(err, "Failed to check if pod is controlled by active DaemonSet")
 			continue
 		}
 		if controlledByActiveDaemonSet {
-			l.Info("Pod is controlled by active DaemonSet. Skipping", "pod", pod.Name)
+			l.Info("Pod is controlled by active DaemonSet. Skipping")
+			continue
+		}
+		if r.podIsStatic(pod) {
+			l.Info("Pod is static. Skipping")
 			continue
 		}
 
@@ -323,6 +335,19 @@ func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.C
 	}
 
 	return filteredPods, nil
+}
+
+// podIsStatic returns true if the pod is a static pod.
+// https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/
+// Such pods are directly managed by the kubelet and should not be deleted.
+// The check is based on the pod's controller being the node itself.
+func (r *NodeForceDrainReconciler) podIsStatic(pod corev1.Pod) bool {
+	controllerRef := metav1.GetControllerOf(&pod)
+	if controllerRef == nil {
+		return false
+	}
+
+	return controllerRef.APIVersion == "v1" && controllerRef.Kind == "Node"
 }
 
 // podIsControlledByExistingDaemonSet returns true if the pod is controlled by an existing DaemonSet.
@@ -345,7 +370,7 @@ func (r *NodeForceDrainReconciler) podIsControlledByExistingDaemonSet(ctx contex
 		// Edge case: Pod was orphaned
 		// See https://github.com/kubernetes/kubectl/blob/442e3d141a35703b7637f41339b9f73cad005c47/pkg/drain/filters.go#L174
 		if apierrors.IsNotFound(err) {
-			l.Info("No daemon set found for pod", "daemonSet", controllerRef.Name, "pod", pod.Name, "namespace", pod.Namespace)
+			l.Info("No daemon set found for pod", "daemonSet", controllerRef.Name, "pod", pod.Name, "podNamespace", pod.Namespace)
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to get DaemonSet %s: %w", controllerRef.Name, err)

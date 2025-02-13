@@ -226,7 +226,7 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 	})
 }
 
-func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSets(t *testing.T) {
+func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSetsStaticPods(t *testing.T) {
 	ctx := log.IntoContext(context.Background(), testr.New(t))
 
 	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.Local)}
@@ -310,6 +310,23 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSets(t *tes
 			NodeName: drainingNode.Name,
 		},
 	}
+	staticPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "static-pod",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "v1",
+					Kind:       "Node",
+					Name:       drainingNode.Name,
+					Controller: ptr.To(true),
+				},
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+		},
+	}
 
 	forceDrain := &managedupgradev1beta1.NodeForceDrain{
 		ObjectMeta: metav1.ObjectMeta{
@@ -334,7 +351,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSets(t *tes
 	}
 
 	cli := controllerClient(t, forceDrain, drainingNode,
-		podWithNoController, podWithDeploymentController, ownerDaemonSet, podWithActiveDaemonSetController, podWithInvalidDaemonSetController)
+		podWithNoController, podWithDeploymentController, ownerDaemonSet, podWithActiveDaemonSetController, podWithInvalidDaemonSetController, staticPod)
 
 	subject := &NodeForceDrainReconciler{
 		Client:    cli,
@@ -346,7 +363,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSets(t *tes
 
 	var pods corev1.PodList
 	require.NoError(t, cli.List(ctx, &pods, client.InNamespace("default")))
-	require.Len(t, pods.Items, 4, "precondition: all testing pods should be present")
+	require.Len(t, pods.Items, 5, "precondition: all testing pods should be present")
 
 	_, err := subject.Reconcile(ctx, requestForObject(forceDrain))
 	require.NoError(t, err)
@@ -357,7 +374,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSets(t *tes
 	for _, pod := range podsAfterDrain.Items {
 		podNames = append(podNames, pod.Name)
 	}
-	require.ElementsMatch(t, podNames, []string{"pod-with-active-daemonset-controller"}, "the pod with an active DaemonSet controller should not have been ignored")
+	require.ElementsMatch(t, podNames, []string{"pod-with-active-daemonset-controller", "static-pod"}, "the pod with an active DaemonSet controller and the static pod should be left alone")
 }
 
 func Test_NodeForceDrainReconciler_Reconcile_MaxIntervalDuringActiveDrain(t *testing.T) {
