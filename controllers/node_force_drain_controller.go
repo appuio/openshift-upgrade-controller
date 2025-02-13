@@ -314,24 +314,48 @@ func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.C
 		return nil, fmt.Errorf("failed to list pods on node %s: %w", node.Name, err)
 	}
 
+	type ignoredPod struct {
+		Name      string
+		Namespace string
+		Reason    string
+	}
+
+	ignoredPods := make([]ignoredPod, 0, len(pods.Items))
 	filteredPods := make([]corev1.Pod, 0, len(pods.Items))
 	for _, pod := range pods.Items {
 		l := l.WithValues("pod", pod.Name, "podNamespace", pod.Namespace)
 		controlledByActiveDaemonSet, err := r.podIsControlledByExistingDaemonSet(ctx, pod)
 		if err != nil {
 			l.Error(err, "Failed to check if pod is controlled by active DaemonSet")
+			ignoredPods = append(ignoredPods, ignoredPod{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+				Reason:    "error checking daemonset",
+			})
 			continue
 		}
 		if controlledByActiveDaemonSet {
-			l.Info("Pod is controlled by active DaemonSet. Skipping")
+			ignoredPods = append(ignoredPods, ignoredPod{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+				Reason:    "controlled by daemonset",
+			})
 			continue
 		}
 		if r.podIsStatic(pod) {
-			l.Info("Pod is static. Skipping")
+			ignoredPods = append(ignoredPods, ignoredPod{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+				Reason:    "static pod",
+			})
 			continue
 		}
 
 		filteredPods = append(filteredPods, pod)
+	}
+
+	if len(ignoredPods) > 0 {
+		l.Info("Ignoring pods", "ignoredPods", ignoredPods)
 	}
 
 	return filteredPods, nil
