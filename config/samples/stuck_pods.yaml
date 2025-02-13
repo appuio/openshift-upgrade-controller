@@ -1,0 +1,57 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: long-grace-period
+  annotations:
+    description: Deployment that creates pods with 1 hour grace periods
+spec:
+  selector:
+    matchLabels:
+      app: long-grace-period
+  template:
+    metadata:
+      labels:
+        app: long-grace-period
+    spec:
+      containers:
+      - name: long-grace-period
+        image: debian:latest
+        command:
+        - sleep
+        - infinity
+      terminationGracePeriodSeconds: 3600
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: erronous-pdb
+  annotations:
+    description: 'Stateful set with only one replica and matching PDB with minAvailable: 1'
+spec:
+  selector:
+    matchLabels:
+      app: erronous-pdb
+  serviceName: erronous-pdb
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: erronous-pdb
+    spec:
+      containers:
+      - name: erronous-pdb
+        image: debian:latest
+        command:
+        - sleep
+        - infinity
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: erronous-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: erronous-pdb
