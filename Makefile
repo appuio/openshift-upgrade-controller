@@ -27,12 +27,12 @@ build: generate manifests fmt vet $(BIN_FILENAME) ## Build manager binary
 
 .PHONY: manifests
 manifests: ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	go run sigs.k8s.io/controller-tools/cmd/controller-gen rbac:roleName=manager-role crd:generateEmbeddedObjectMeta=true webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	go tool sigs.k8s.io/controller-tools/cmd/controller-gen rbac:roleName=manager-role crd:generateEmbeddedObjectMeta=true webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: ## Generate manifests e.g. CRD, RBAC etc.
 	go generate ./...
-	go run sigs.k8s.io/controller-tools/cmd/controller-gen object paths="./..."
+	go tool sigs.k8s.io/controller-tools/cmd/controller-gen object paths="./..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code
