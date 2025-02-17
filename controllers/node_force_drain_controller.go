@@ -93,13 +93,8 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Check for draining nodes, using the node drainer annotations.
 	drainingNodes := make([]corev1.Node, 0, len(nodes.Items))
 	for _, node := range nodes.Items {
-		l := l.WithValues("node", node.Name)
-		desiredDrain, ddOk := node.Annotations[DesiredDrainerAnnotationKey]
-		lastAppliedDrain, laOk := node.Annotations[LastAppliedDrainerAnnotationKey]
-		if !ddOk || !laOk {
-			l.Info("Node is missing drain annotations. Not OCP?", "desiredDrain", desiredDrain, "lastAppliedDrain", lastAppliedDrain)
-			continue
-		}
+		desiredDrain := node.Annotations[DesiredDrainerAnnotationKey]
+		lastAppliedDrain := node.Annotations[LastAppliedDrainerAnnotationKey]
 		if desiredDrain == lastAppliedDrain {
 			continue
 		}

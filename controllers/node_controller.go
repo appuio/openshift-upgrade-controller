@@ -23,7 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -45,8 +44,6 @@ type NodeReconciler struct {
 
 // Reconcile reacts to Node changes and updates the node draining metric.
 func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	l := log.FromContext(ctx)
-
 	var node corev1.Node
 	if err := r.Get(ctx, req.NamespacedName, &node); err != nil {
 		nodeDraining.DeleteLabelValues(req.Name)
@@ -57,13 +54,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 
-	desiredDrain, ddOk := node.Annotations[DesiredDrainerAnnotationKey]
-	lastAppliedDrain, laOk := node.Annotations[LastAppliedDrainerAnnotationKey]
-	if !ddOk || !laOk {
-		l.Info("Node is missing drain annotations. Not OCP?", "node", node.Name, "desiredDrain", desiredDrain, "lastAppliedDrain", lastAppliedDrain)
-		nodeDraining.DeleteLabelValues(node.Name)
-		return ctrl.Result{}, nil
-	}
+	desiredDrain := node.Annotations[DesiredDrainerAnnotationKey]
+	lastAppliedDrain := node.Annotations[LastAppliedDrainerAnnotationKey]
 
 	if desiredDrain == lastAppliedDrain {
 		nodeDraining.WithLabelValues(node.Name).Set(0)
