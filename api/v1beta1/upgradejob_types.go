@@ -55,6 +55,8 @@ const (
 	UpgradeJobReasonNoManagedPools = "NoManagedPools"
 	// UpgradeJobReasonDelaySet is used if the upgrade job paused machine config pools due to delayUpgrade
 	UpgradeJobReasonDelaySet = "DelaySet"
+	// UpgradeJobReasonDelayReached is used to indicate that the pause delay for the upgrade of the machine config pool has expired.
+	UpgradeJobReasonDelayReached = "DelayReached"
 )
 
 // UpgradeJobSpec defines the desired state of UpgradeJob
@@ -145,6 +147,11 @@ type UpgradeJobStatus struct {
 type HookJobTracker struct {
 	// HookEvent is the event of the hook
 	HookEvent string `json:"hookEvent,omitempty"`
+	// TrackingKey is an additional key to track the hook.
+	// Should be unique events that must run multiple times.
+	// The event emitter is responsible for ensuring the uniqueness of the key.
+	// Events that are run only once per upgrade job can omit this key.
+	TrackingKey string `json:"trackingKey,omitempty"`
 	// UpdgradeJobHook is the hook that was executed
 	UpgradeJobHookName string `json:"upgradeJobHook,omitempty"`
 

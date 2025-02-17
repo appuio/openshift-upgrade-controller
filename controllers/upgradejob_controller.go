@@ -55,6 +55,9 @@ const (
 	hookJobTrackingLabelUpgradeJobHook = "upgradejobs.managedupgrade.appuio.io/upgradejobhook"
 	hookJobTrackingLabelUpgradeJob     = "upgradejobs.managedupgrade.appuio.io/upgradejobk"
 	hookJobTrackingLabelEvent          = "upgradejobs.managedupgrade.appuio.io/event"
+	hookJobTrackingLabelTrackingKey    = "upgradejobs.managedupgrade.appuio.io/tracking-key"
+
+	noTrackingKey = ""
 )
 
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
@@ -94,8 +97,8 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if sc != nil && sc.Status == metav1.ConditionTrue {
 		// Ignore hooks status, they can't influence the upgrade anymore.
 		// Don't execute hooks created after the job was finished.
-		_, eserr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventSuccess, sc.Reason, sc.LastTransitionTime.Time)
-		_, eferr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, sc.Reason, sc.LastTransitionTime.Time)
+		_, eserr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventSuccess, noTrackingKey, eventInfoWithReason(sc.Reason), sc.LastTransitionTime.Time)
+		_, eferr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, noTrackingKey, eventInfoWithReason(sc.Reason), sc.LastTransitionTime.Time)
 		return ctrl.Result{}, multierr.Combine(
 			eserr,
 			eferr,
@@ -108,12 +111,12 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if fc != nil && fc.Status == metav1.ConditionTrue {
 		// Ignore hooks status, they can't influence the upgrade anymore.
 		// Don't execute hooks created after the job was finished.
-		_, efaerr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFailure, fc.Reason, fc.LastTransitionTime.Time)
-		_, efierr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, fc.Reason, fc.LastTransitionTime.Time)
+		_, efaerr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFailure, noTrackingKey, eventInfoWithReason(fc.Reason), fc.LastTransitionTime.Time)
+		_, efierr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, noTrackingKey, eventInfoWithReason(fc.Reason), fc.LastTransitionTime.Time)
 		return ctrl.Result{}, multierr.Combine(efaerr, efierr, r.cleanupLock(ctx, uj))
 	}
 
-	cont, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventCreate, "", time.Time{})
+	cont, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventCreate, noTrackingKey, eventInfoWithReason(""), time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -171,7 +174,7 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (ctrl.Result, error) {
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.reconcileStartedJob")
 
-	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart, managedupgradev1beta1.UpgradeJobReasonStarted, time.Time{})
+	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart, noTrackingKey, eventInfoWithReason(managedupgradev1beta1.UpgradeJobReasonStarted), time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -201,8 +204,12 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, fmt.Errorf("failed to lock cluster version: %w", err)
 	}
 
-	if err := r.pauseUnpauseMachineConfigPools(ctx, uj); err != nil {
+	cont, err = r.pauseUnpauseMachineConfigPools(ctx, uj)
+	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to pause machine config pools: %w", err)
+	}
+	if !cont {
+		return ctrl.Result{}, nil
 	}
 
 	ok, err := r.runHealthCheck(ctx, uj, version,
@@ -287,7 +294,7 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 		return ctrl.Result{}, nil
 	}
 
-	cont, err = r.executeHooks(ctx, uj, managedupgradev1beta1.EventUpgradeComplete, managedupgradev1beta1.UpgradeJobReasonCompleted, time.Time{})
+	cont, err = r.executeHooks(ctx, uj, managedupgradev1beta1.EventUpgradeComplete, noTrackingKey, eventInfoWithReason(managedupgradev1beta1.UpgradeJobReasonCompleted), time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -481,8 +488,13 @@ func (r *UpgradeJobReconciler) tryLockClusterVersion(ctx context.Context, versio
 	return nil
 }
 
-func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent, reason string, cutoffTime time.Time) (bool, error) {
-	l := log.FromContext(ctx)
+// executeHooks executes hooks for the given event and tracking key.
+// It returns true if the job matching the given event and tracking key is finished.
+// Tracking key may be empty if the event is unique in the lifetime of the job.
+// It does not return an error if the hook fails, only if an error happens during job creation or job tracking.
+// executeHooks directly updates the status of the upgrade job if a hook influencing the outcome fails.
+func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob, event managedupgradev1beta1.UpgradeEvent, trackingKey string, addEventInfo map[string]any, cutoffTime time.Time) (bool, error) {
+	l := log.FromContext(ctx).WithValues("event", event, "trackingKey", trackingKey)
 
 	var allHooks managedupgradev1beta1.UpgradeJobHookList
 	if err := r.List(ctx, &allHooks, client.InNamespace(uj.Namespace)); err != nil {
@@ -525,7 +537,7 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 	errors := []error{}
 	failedJobs := []string{}
 	for _, hook := range hooks {
-		jobs, err := r.jobForUpgradeJobAndHook(ctx, uj, hook, event, reason, hookJobMeta{MatchesDisruptiveHooks: hasMatchingDisruptiveHook})
+		jobs, err := r.jobForUpgradeJobAndHook(ctx, uj, hook, event, trackingKey, addEventInfo, hookJobMeta{MatchesDisruptiveHooks: hasMatchingDisruptiveHook})
 		if err != nil {
 			errors = append(errors, err)
 			continue
@@ -553,7 +565,9 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 		return false, nil
 	}
 
-	if len(failedJobs) > 0 && event.InfluencesOutcome() {
+	jobFinished := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded) != nil ||
+		apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed) != nil
+	if len(failedJobs) > 0 && event.InfluencesOutcome() && !jobFinished {
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
 			Status:  metav1.ConditionTrue,
@@ -562,7 +576,7 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 		})
 		return false, r.Status().Update(ctx, uj)
 	} else if len(failedJobs) > 0 {
-		l.Info("hooks failed but event does not influence outcome", "failedJobs", failedJobs)
+		l.Info("hooks failed but event does not influence outcome", "failedJobs", failedJobs, "jobAlreadyFinished", jobFinished)
 	}
 
 	return true, nil
@@ -577,20 +591,22 @@ func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(
 	uj *managedupgradev1beta1.UpgradeJob,
 	hook managedupgradev1beta1.UpgradeJobHook,
 	event managedupgradev1beta1.UpgradeEvent,
-	reason string,
+	trackingKey string,
+	addEventInfo map[string]any,
 	meta hookJobMeta,
 ) ([]managedupgradev1beta1.HookJobTracker, error) {
 	var jobs batchv1.JobList
-	if err := r.List(ctx, &jobs, client.InNamespace(uj.Namespace), client.MatchingLabels(jobLabels(uj.Name, hook.Name, event))); err != nil {
+	if err := r.List(ctx, &jobs, client.InNamespace(uj.Namespace), client.MatchingLabels(jobLabels(uj.Name, hook.Name, event, trackingKey))); err != nil {
 		return nil, err
 	}
 
-	jobStatus := findTrackedHookJob(hook.Name, string(event), *uj)
+	jobStatus := findTrackedHookJob(hook.Name, string(event), trackingKey, *uj)
 	slices.Grow(jobStatus, len(jobs.Items))
 	for _, job := range jobs.Items {
 		st, msg := hookStatusFromJob(job)
 		jobStatus = append(jobStatus, managedupgradev1beta1.HookJobTracker{
 			HookEvent:          string(event),
+			TrackingKey:        trackingKey,
 			UpgradeJobHookName: hook.Name,
 			Status:             st,
 			Message:            msg,
@@ -601,9 +617,10 @@ func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(
 		return jobStatus, nil
 	}
 
-	_, err := r.createHookJob(ctx, hook, uj, event, reason, meta)
+	_, err := r.createHookJob(ctx, hook, uj, event, trackingKey, addEventInfo, meta)
 	return []managedupgradev1beta1.HookJobTracker{{
 		HookEvent:          string(event),
+		TrackingKey:        trackingKey,
 		UpgradeJobHookName: hook.Name,
 		Status:             managedupgradev1beta1.HookJobTrackerStatusActive,
 	}}, err
@@ -614,7 +631,8 @@ func (r *UpgradeJobReconciler) createHookJob(
 	hook managedupgradev1beta1.UpgradeJobHook,
 	uj *managedupgradev1beta1.UpgradeJob,
 	event managedupgradev1beta1.UpgradeEvent,
-	reason string,
+	trackingKey string,
+	addEventInfo map[string]any,
 	meta hookJobMeta,
 ) (batchv1.Job, error) {
 	l := log.FromContext(ctx)
@@ -622,12 +640,11 @@ func (r *UpgradeJobReconciler) createHookJob(
 
 	ll := make(map[string]string)
 	maps.Copy(ll, tmpl.Labels)
-	maps.Copy(ll, jobLabels(uj.Name, hook.Name, event))
+	maps.Copy(ll, jobLabels(uj.Name, hook.Name, event, trackingKey))
 
-	normalizedEvent := map[string]any{
-		"name":   string(event),
-		"reason": reason,
-	}
+	normalizedEvent := map[string]any{}
+	maps.Copy(normalizedEvent, addEventInfo)
+	normalizedEvent["name"] = string(event)
 
 	normalizedUJ, err := normalizeAsJson(uj)
 	if err != nil {
@@ -701,11 +718,12 @@ func jobName(elems ...string) string {
 	return name
 }
 
-func jobLabels(jobName, hookName string, event managedupgradev1beta1.UpgradeEvent) map[string]string {
+func jobLabels(jobName, hookName string, event managedupgradev1beta1.UpgradeEvent, trackingKey string) map[string]string {
 	return map[string]string{
 		hookJobTrackingLabelUpgradeJobHook: hookName,
 		hookJobTrackingLabelUpgradeJob:     jobName,
 		hookJobTrackingLabelEvent:          string(event),
+		hookJobTrackingLabelTrackingKey:    trackingKey,
 	}
 }
 
@@ -792,6 +810,7 @@ func (r *UpgradeJobReconciler) trackHookJobs(ctx context.Context, req ctrl.Reque
 	for _, j := range jl.Items {
 		s := managedupgradev1beta1.HookJobTracker{
 			HookEvent:          j.Labels[hookJobTrackingLabelEvent],
+			TrackingKey:        j.Labels[hookJobTrackingLabelTrackingKey],
 			UpgradeJobHookName: j.Labels[hookJobTrackingLabelUpgradeJobHook],
 		}
 
@@ -811,7 +830,7 @@ func (r *UpgradeJobReconciler) trackHookJobs(ctx context.Context, req ctrl.Reque
 	if !sets.New(uj.Status.HookJobTracker...).Equal(currentAndCompleted) {
 		uj.Status.HookJobTracker = currentAndCompleted.UnsortedList()
 		slices.SortFunc(uj.Status.HookJobTracker, func(a, b managedupgradev1beta1.HookJobTracker) int {
-			return strings.Compare(a.UpgradeJobHookName+a.HookEvent, b.UpgradeJobHookName+b.HookEvent)
+			return strings.Compare(a.UpgradeJobHookName+a.HookEvent+a.TrackingKey, b.UpgradeJobHookName+b.HookEvent+b.TrackingKey)
 		})
 		if err := r.Status().Update(ctx, &uj); err != nil {
 			return err
@@ -862,10 +881,10 @@ func (r *UpgradeJobReconciler) cleanupHookJobTrackingFinalizers(ctx context.Cont
 	return multierr.Combine(errs...)
 }
 
-func findTrackedHookJob(ujhookName, event string, uj managedupgradev1beta1.UpgradeJob) []managedupgradev1beta1.HookJobTracker {
+func findTrackedHookJob(ujhookName, event, trackingKey string, uj managedupgradev1beta1.UpgradeJob) []managedupgradev1beta1.HookJobTracker {
 	f := make([]managedupgradev1beta1.HookJobTracker, 0, len(uj.Status.HookJobTracker))
 	for _, h := range uj.Status.HookJobTracker {
-		if h.UpgradeJobHookName == ujhookName && h.HookEvent == event {
+		if h.UpgradeJobHookName == ujhookName && h.HookEvent == event && h.TrackingKey == trackingKey {
 			f = append(f, h)
 		}
 	}
@@ -876,7 +895,8 @@ func findTrackedHookJob(ujhookName, event string, uj managedupgradev1beta1.Upgra
 // The decision to pause or unpause is based on `pool.DelayUpgrade.DelayMin` relative to the startAfter time of the upgrade job.
 // It sets a timeout condition and returns an error if the delay is expired.
 // It also returns an error if the machine config pools cannot be listed or updated.
-func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) error {
+// It returns false if conciliation should be stopped to wait for the next event, and true if it should continue.
+func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (bool, error) {
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.pauseUnpauseMachineConfigPools")
 
 	var controllerManagesPools bool
@@ -892,13 +912,13 @@ func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Contex
 
 		sel, err := metav1.LabelSelectorAsSelector(pool.MatchLabels)
 		if err != nil {
-			return fmt.Errorf("failed to parse machine config pool selector: %w", err)
+			return true, fmt.Errorf("failed to parse machine config pool selector: %w", err)
 		}
 		var mcpl machineconfigurationv1.MachineConfigPoolList
 		if err := r.List(ctx, &mcpl, &client.ListOptions{
 			LabelSelector: sel,
 		}); err != nil {
-			return fmt.Errorf("failed to list machine config pools %q: %w", pool.MatchLabels, err)
+			return true, fmt.Errorf("failed to list machine config pools %q: %w", pool.MatchLabels, err)
 		}
 		for _, mcp := range mcpl.Items {
 			l = l.WithValues("pool", mcp.Name, "paused", mcp.Spec.Paused)
@@ -915,9 +935,18 @@ func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Contex
 				// always return an error so the current reconcile is stopped and requeued
 				err := fmt.Errorf("unpausing of pool %q expired", mcp.Name)
 				l.Error(err, "unpausing of pool expired", "maxDelay", pool.DelayUpgrade.DelayMax.Duration)
-				return multierr.Combine(err, r.Status().Update(ctx, uj))
+				return true, multierr.Combine(err, r.Status().Update(ctx, uj))
 			}
 			if mcp.Spec.Paused != shouldPause {
+				if mcp.Spec.Paused {
+					cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventMachineConfigPoolUnpause, mcp.Name, eventInfoUnpause(managedupgradev1beta1.UpgradeJobReasonDelayReached, mcp.Name), time.Time{})
+					if err != nil {
+						return true, fmt.Errorf("failed to execute unpause hooks for machine config pool %q: %w", mcp.Name, err)
+					}
+					if !cont {
+						return false, nil
+					}
+				}
 				l.Info("Updating machine config pools pause field", "from", mcp.Spec.Paused, "to", shouldPause)
 				if mcp.Annotations == nil {
 					mcp.Annotations = map[string]string{}
@@ -926,7 +955,7 @@ func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Contex
 				mcp.Annotations[JobLockAnnotation] = uj.Namespace + "/" + uj.Name
 				mcp.Spec.Paused = shouldPause
 				if err := r.Update(ctx, &mcp); err != nil {
-					return fmt.Errorf("failed to pause/unpause machine config pool %q: %w", mcp.Name, err)
+					return true, fmt.Errorf("failed to pause/unpause machine config pool %q: %w", mcp.Name, err)
 				}
 			}
 		}
@@ -941,10 +970,10 @@ func (r *UpgradeJobReconciler) pauseUnpauseMachineConfigPools(ctx context.Contex
 		Status: boolToStatus(controllerPausedPools),
 		Reason: reason,
 	}) {
-		return r.Status().Update(ctx, uj)
+		return true, r.Status().Update(ctx, uj)
 	}
 
-	return nil
+	return true, nil
 }
 
 // filterPaused returns the paused and active pools from the given list of pools.
@@ -1064,6 +1093,10 @@ func (r *UpgradeJobReconciler) cleanupMachineConfigPools(ctx context.Context, uj
 		if mcp.Spec.Paused {
 			l.Info("unpausing machine config pool", "pool", mcp.Name)
 			mcp.Spec.Paused = false
+			if _, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventMachineConfigPoolUnpause, mcp.Name, eventInfoUnpause(managedupgradev1beta1.UpgradeJobReasonCompleted, mcp.Name), time.Time{}); err != nil {
+				errs = append(errs, fmt.Errorf("failed to execute unpause hooks for machine config pool %q: %w", mcp.Name, err))
+				continue
+			}
 		}
 		if err := r.Update(ctx, &mcp); err != nil {
 			errs = append(errs, fmt.Errorf("failed to cleanup machine config pool %q: %w", mcp.Name, err))
@@ -1071,4 +1104,17 @@ func (r *UpgradeJobReconciler) cleanupMachineConfigPools(ctx context.Context, uj
 	}
 
 	return multierr.Combine(errs...)
+}
+
+func eventInfoWithReason(reason string) map[string]any {
+	return map[string]any{
+		"reason": reason,
+	}
+}
+
+func eventInfoUnpause(reason, mcpName string) map[string]any {
+	return map[string]any{
+		"pool":   mcpName,
+		"reason": reason,
+	}
 }
