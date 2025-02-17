@@ -1623,7 +1623,7 @@ func stuckPodSimulator(ctx context.Context, cli client.WithWatch, obj client.Obj
 		opt.ApplyToDelete(&delOpts)
 	}
 	_, isPod := obj.(*corev1.Pod)
-	if isPod && delOpts.GracePeriodSeconds != nil && *delOpts.GracePeriodSeconds == 0 {
+	if isPod && delOpts.GracePeriodSeconds != nil && (*delOpts.GracePeriodSeconds == 0 || *delOpts.GracePeriodSeconds == 1) {
 		var pod corev1.Pod
 		if err := cli.Get(ctx, client.ObjectKeyFromObject(obj), &pod); err != nil {
 			return fmt.Errorf("failed to get pod to remove finalizer: %w", err)
