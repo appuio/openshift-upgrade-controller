@@ -289,7 +289,12 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 
 		l.Info("Force deleting pod")
 		if err := r.Delete(ctx, &pod, &client.DeleteOptions{
-			GracePeriodSeconds: ptr.To(int64(0)),
+			// As far is I was able to find a grace period of 0 will leave the hanging pod on the node and block the reboot of the node.
+			// Therefore we set a grace period of 1 second for the quickest possible deletion.
+			// See kubectl delete docs:
+			// https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#delete
+			// > Period of time in seconds given to the resource to terminate gracefully. [...] Set to 1 for immediate shutdown. Can only be set to 0 when --force is true (force deletion).
+			GracePeriodSeconds: ptr.To(int64(1)),
 		}); err != nil {
 			deletionErrs = append(deletionErrs, err)
 		}
