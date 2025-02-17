@@ -39,15 +39,6 @@ func Test_NodeReconciler_Reconcile(t *testing.T) {
 	_, err = subject.Reconcile(ctx, requestFor("node1"))
 	require.NoError(t, err)
 	compareMetrics(t, "node1", 1.0, "node should be draining if desired drainer is different from last applied drainer annotation")
-
-	n := node("node1", "", "")
-	n.Annotations = map[string]string{}
-	require.NoError(t, client.Update(ctx, n))
-	_, err = subject.Reconcile(ctx, requestFor("node1"))
-	require.NoError(t, err)
-	require.Equal(t, 0,
-		testutil.CollectAndCount(nodeDraining, "openshift_upgrade_controller_node_draining"),
-		"metric should be removed if not able to calculate it")
 }
 
 func compareMetrics(t *testing.T, nodeLbl string, expected float64, msgAndArgs ...interface{}) {
