@@ -51,14 +51,33 @@ spec:
                   Events is the list of events to trigger the hook to be executed.
                   Events should be idempotent and not assume any prior events have been executed.
                   `Create`, `Start`, and `UpgradeComplete` are the events that influence the outcome of the upgrade.
+                  `MachineConfigPoolUnpause` can influence the outcome of the upgrade if the upgrade is not yet in a final state.
                   `Finish`, `Success`, and `Failure` do not influence the outcome of the upgrade,
                   Job completion will not be checked, they are only used for informational purposes.
+                  `Create` is the event type for when a job is created.
+                  The version is pinned at this point and the job is waiting for startAfter.
+                  This can be used to communicate the pending upgrade to other systems.
+                  See `pinVersionWindow` in `UpgradeConfig`.
+                  `Start` is the event type for when a job is started.
+                  `UpgradeCompleted` is the event type for when the upgrade is completed and health checks have passed,
+                  but before any paused MachineConfigPools are done upgrading.
+                  `MachineConfigPoolUnpause` is the event type for when a machine config pool is unpaused.
+                  This event can only influence the outcome of the upgrade if the upgrade is not yet in a final state.
+                  Consumers of this event might want to check the `EVENT_reason` environment variable to see if the pool was unpaused because of a delay or because the upgrade is in a final state.
+                  We do not know if the pool needs updating in advance, thus the upgrade might complete without the pool being unpaused.
+                  - Reason: `"DelayReached"` if the pool was unpaused regularly during a full upgrade.
+                  - Reason: `"Completed"` if the pool was unpaused because the upgrade finished without changes to the pool.
+                  The name of the unpaused pool is available in the `EVENT_pool` environment variable.
+                  `Finish` is the event type for when a job is finished regardless of outcome.
+                  `Success` is the event type for when a job is finished successfully.
+                  `Failure` is the event type for when a job is finished with a failure.
                 items:
                   description: UpgradeEvent is the type for upgrade events.
                   enum:
                   - Create
                   - Start
                   - UpgradeComplete
+                  - MachineConfigPoolUnpause
                   - Finish
                   - Success
                   - Failure

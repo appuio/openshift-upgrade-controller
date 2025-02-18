@@ -145,7 +145,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	}
 
 	step(t, "`Create` hook", func(t *testing.T) {
-		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, false)
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, noTrackingKey, false)
 	})
 
 	step(t, "Scheduled too early", func(t *testing.T) {
@@ -164,7 +164,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	})
 
 	step(t, "`Start` hook", func(t *testing.T) {
-		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventStart, false)
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventStart, noTrackingKey, false)
 	})
 
 	step(t, "Lock cluster version", func(t *testing.T) {
@@ -283,7 +283,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	})
 
 	step(t, "`UpgradeComplete` hook", func(t *testing.T) {
-		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventUpgradeComplete, true)
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventUpgradeComplete, noTrackingKey, true)
 	})
 
 	step(t, "finish and cleanup", func(t *testing.T) {
@@ -304,8 +304,8 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 	})
 
 	step(t, "`Success` and `Finish` hooks", func(t *testing.T) {
-		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventSuccess, true)
-		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, true)
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventSuccess, noTrackingKey, true)
+		checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, noTrackingKey, true)
 
 		clock.Advance(24 * time.Hour)
 
@@ -433,7 +433,7 @@ func Test_UpgradeJobReconciler_Reconcile_Skipped_Job(t *testing.T) {
 
 	step(t, "`Success` and `Finish` hooks", func(t *testing.T) {
 		for _, event := range []managedupgradev1beta1.UpgradeEvent{managedupgradev1beta1.EventSuccess, managedupgradev1beta1.EventFinish} {
-			job := checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, event, true)
+			job := checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, event, noTrackingKey, true)
 			require.Len(t, job.Spec.Template.Spec.Containers, 1)
 			requireEnv(t, job.Spec.Template.Spec.Containers[0].Env, "EVENT_reason", func(v string) (bool, error) { return v == `"Skipped"`, nil })
 		}
@@ -493,13 +493,13 @@ func Test_UpgradeJobReconciler_Reconcile_EmptyDesiredVersion(t *testing.T) {
 	}
 
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
-	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventStart, false)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventStart, noTrackingKey, false)
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
-	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventUpgradeComplete, false)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventUpgradeComplete, noTrackingKey, false)
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
-	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventSuccess, false)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventSuccess, noTrackingKey, false)
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
-	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, false)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFinish, noTrackingKey, false)
 }
 
 func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
@@ -550,7 +550,7 @@ func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
 		ManagedUpstreamClusterVersionName: "version",
 	}
 
-	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, true)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, noTrackingKey, true)
 
 	_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
 	require.NoError(t, err)
@@ -560,7 +560,7 @@ func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
 		"hook failure with failure policy Abort should mark job as failed",
 	)
 
-	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFailure, false)
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventFailure, noTrackingKey, false)
 
 	require.NoError(t, c.Delete(ctx, upgradeJob))
 	// Reconcile can still be called after the job is deleted since we have controller references with finalizers
@@ -655,7 +655,7 @@ func Test_UpgradeJobReconciler_Reconcile_HookJobContainerEnv(t *testing.T) {
 		ManagedUpstreamClusterVersionName: "version",
 	}
 
-	job := checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, true)
+	job := checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, noTrackingKey, true)
 
 	require.Equal(t, 2, len(job.Spec.Template.Spec.Containers))
 
@@ -781,11 +781,11 @@ func Test_UpgradeJobReconciler_Reconcile_Disruptive(t *testing.T) {
 		}
 	}
 
-	job := checkAndCompleteHook(t, c, subject, upgradeJob, disruptiveJobHook, managedupgradev1beta1.EventCreate, true)
+	job := checkAndCompleteHook(t, c, subject, upgradeJob, disruptiveJobHook, managedupgradev1beta1.EventCreate, noTrackingKey, true)
 	require.Equal(t, 1, len(job.Spec.Template.Spec.Containers))
 	requireEnv(t, job.Spec.Template.Spec.Containers[0].Env, "META_matchesDisruptiveHooks", matchStr("true"))
 
-	job = checkAndCompleteHook(t, c, subject, upgradeJob, otherJobHook, managedupgradev1beta1.EventCreate, true)
+	job = checkAndCompleteHook(t, c, subject, upgradeJob, otherJobHook, managedupgradev1beta1.EventCreate, noTrackingKey, true)
 	require.Equal(t, 1, len(job.Spec.Template.Spec.Containers))
 	requireEnv(t, job.Spec.Template.Spec.Containers[0].Env, "META_matchesDisruptiveHooks", matchStr("true"))
 }
@@ -1236,7 +1236,7 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) 
 				MachineConfigPools: []managedupgradev1beta1.UpgradeJobMachineConfigPoolSpec{
 					{
 						MatchLabels: &metav1.LabelSelector{
-							MatchLabels: map[string]string{"name": "worker"},
+							MatchLabels: workerPool.Labels,
 						},
 						DelayUpgrade: managedupgradev1beta1.UpgradeJobMachineConfigPoolDelayUpgradeSpec{
 							DelayMin: metav1.Duration{Duration: 1 * time.Hour},
@@ -1247,7 +1247,35 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) 
 		},
 	}
 
-	client := controllerClient(t, ucv, upgradeJob, masterPool, storagePool, workerPool)
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      strings.Repeat("notify", 10),
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventMachineConfigPoolUnpause,
+			},
+			Template: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name: "test",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob, upgradeJobHook, masterPool, storagePool, workerPool)
 
 	subject := &UpgradeJobReconciler{
 		Client: client,
@@ -1307,7 +1335,12 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) 
 
 	// advance time to the end of the delay
 	clock.Advance(lastResult.RequeueAfter)
-	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	// check hook job
+	job := checkAndCompleteHook(t, client, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventMachineConfigPoolUnpause, workerPool.Name, true)
+	requireEnv(t, job.Spec.Template.Spec.Containers[0].Env, "EVENT_reason", func(v string) (bool, error) {
+		var ev string
+		return ev == managedupgradev1beta1.UpgradeJobReasonDelayReached, json.Unmarshal([]byte(v), &ev)
+	})
 	// check job conditions
 	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 	requireJobNotInFinalState(t, *upgradeJob)
@@ -1397,7 +1430,22 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_UnpauseExpire(
 		},
 	}
 
-	client := controllerClient(t, ucv, upgradeJob, workerPool)
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      strings.Repeat("notify", 10),
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventMachineConfigPoolUnpause,
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob, upgradeJobHook, workerPool)
 
 	subject := &UpgradeJobReconciler{
 		Client: client,
@@ -1429,6 +1477,10 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_UnpauseExpire(
 	require.NotNil(t, failedCond, "should set failed condition")
 	require.Equal(t, metav1.ConditionTrue, failedCond.Status, "should set failed condition")
 	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonUnpausingPoolsExpired, failedCond.Reason, "should set reason to unpausing pools expired")
+
+	var jobs batchv1.JobList
+	require.NoError(t, client.List(ctx, &jobs))
+	require.Empty(t, jobs.Items, "no unpause event should be created on expiry")
 }
 
 // Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_EnsureUnpause tests that the upgrade job reconciler
@@ -1493,7 +1545,35 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_EnsureUnpause(
 		},
 	}
 
-	client := controllerClient(t, ucv, upgradeJob, workerPool)
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      strings.Repeat("notify", 10),
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventMachineConfigPoolUnpause,
+			},
+			Template: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name: "test",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob, upgradeJobHook, workerPool)
 
 	subject := &UpgradeJobReconciler{
 		Client: client,
@@ -1532,6 +1612,12 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_EnsureUnpause(
 	require.Equal(t, metav1.ConditionTrue, succeededCond.Status)
 	require.NoError(t, client.Get(ctx, requestForObject(workerPool).NamespacedName, workerPool))
 	require.False(t, workerPool.Spec.Paused, "should have unpaused worker mcp for completed job")
+
+	job := checkAndCompleteHook(t, client, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventMachineConfigPoolUnpause, workerPool.Name, true)
+	requireEnv(t, job.Spec.Template.Spec.Containers[0].Env, "EVENT_reason", func(v string) (bool, error) {
+		var ev string
+		return ev == managedupgradev1beta1.UpgradeJobReasonCompleted, json.Unmarshal([]byte(v), &ev)
+	})
 }
 
 func Test_JobFromClusterVersionHandler(t *testing.T) {
@@ -1650,7 +1736,7 @@ func nodeNameIndexer(obj client.Object) []string {
 	return []string{pod.Spec.NodeName}
 }
 
-func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent, fail bool) batchv1.Job {
+func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent, trackingKey string, fail bool) batchv1.Job {
 	t.Helper()
 	ctx := context.Background()
 
@@ -1660,6 +1746,7 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 		hookJobTrackingLabelUpgradeJobHook: upgradeJobHook.Name,
 		hookJobTrackingLabelUpgradeJob:     upgradeJob.Name,
 		hookJobTrackingLabelEvent:          string(event),
+		hookJobTrackingLabelTrackingKey:    trackingKey,
 	}
 
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
@@ -1689,7 +1776,7 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 	require.NotContains(t, jobs.Items[0].Finalizers, UpgradeJobHookJobTrackerFinalizer, "should have removed finalizer from job after completion")
 	var uj managedupgradev1beta1.UpgradeJob
 	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, &uj))
-	tracked := findTrackedHookJob(upgradeJobHook.Name, string(event), uj)
+	tracked := findTrackedHookJob(upgradeJobHook.Name, string(event), trackingKey, uj)
 	require.Len(t, tracked, 1, "should have tracked hook job")
 	require.Equal(t, expectedTrackedStatus, tracked[0].Status, "should track correct state")
 
@@ -1698,7 +1785,7 @@ func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobR
 	require.NoError(t, c.Delete(ctx, &job))
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
 	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, &uj))
-	tracked = findTrackedHookJob(upgradeJobHook.Name, string(event), uj)
+	tracked = findTrackedHookJob(upgradeJobHook.Name, string(event), trackingKey, uj)
 	require.Len(t, tracked, 1, "should still have completed tracked hook job")
 	require.Equal(t, expectedTrackedStatus, tracked[0].Status, "should have kept the state")
 	require.NoError(t, c.List(ctx, &jobs, sel))
