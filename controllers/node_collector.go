@@ -18,10 +18,10 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -34,41 +34,47 @@ const (
 	LastAppliedDrainerAnnotationKey = "machineconfiguration.openshift.io/lastAppliedDrain"
 )
 
-// NodeReconciler reconciles a Node object
-type NodeReconciler struct {
+var nodeDrainingDesc = prometheus.NewDesc(
+	MetricsNamespace+"_node_draining",
+	"Node draining status",
+	[]string{
+		"node",
+	},
+	nil,
+)
+
+// NodeCollector collects metrics from Nodes
+type NodeCollector struct {
 	client.Client
-	Scheme *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
-// Reconcile reacts to Node changes and updates the node draining metric.
-func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	var node corev1.Node
-	if err := r.Get(ctx, req.NamespacedName, &node); err != nil {
-		nodeDraining.DeleteLabelValues(req.Name)
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	if !node.DeletionTimestamp.IsZero() {
-		nodeDraining.DeleteLabelValues(node.Name)
-		return ctrl.Result{}, nil
-	}
+var _ prometheus.Collector = &NodeCollector{}
 
-	desiredDrain := node.Annotations[DesiredDrainerAnnotationKey]
-	lastAppliedDrain := node.Annotations[LastAppliedDrainerAnnotationKey]
-
-	if desiredDrain == lastAppliedDrain {
-		nodeDraining.WithLabelValues(node.Name).Set(0)
-		return ctrl.Result{}, nil
-	}
-
-	nodeDraining.WithLabelValues(node.Name).Set(1)
-	return ctrl.Result{}, nil
+// Describe implements prometheus.Collector.
+// Sends the static description of the metrics to the provided channel.
+func (*NodeCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- nodeDrainingDesc
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Node{}).
-		Complete(r)
+// Collect implements prometheus.Collector.
+// Sends a metric with the current value of the Node draining status to the provided channel.
+func (c *NodeCollector) Collect(ch chan<- prometheus.Metric) {
+	ctx := context.Background()
+
+	var nodes corev1.NodeList
+	if err := c.Client.List(ctx, &nodes); err != nil {
+		err := fmt.Errorf("failed list to nodes: %w", err)
+		ch <- prometheus.NewInvalidMetric(nodeDrainingDesc, err)
+	}
+
+	for _, node := range nodes.Items {
+		ch <- prometheus.MustNewConstMetric(
+			nodeDrainingDesc,
+			prometheus.GaugeValue,
+			boolToFloat64(node.Annotations[DesiredDrainerAnnotationKey] != node.Annotations[LastAppliedDrainerAnnotationKey]),
+			node.Name,
+		)
+	}
 }
