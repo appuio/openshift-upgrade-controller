@@ -4,7 +4,7 @@ go 1.24
 
 toolchain go1.24.0
 
-require github.com/openshift/api v0.0.0-20240729140855-0a58f8c30a8c // release-4.15
+require github.com/openshift/api v0.0.0-20250218162944-da6bf56dce7b // release-4.15
 
 require (
 	dario.cat/mergo v1.0.1
