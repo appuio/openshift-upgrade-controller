@@ -19,7 +19,9 @@ type NodeForceDrainSpec struct {
 	// The duration is calculated from the pods deletion timestamp.
 	// Only pods on nodes that have reached the nodeDrainGracePeriod are force deleted.
 	// The maximum time until pod force deletion is nodeDrainGracePeriod+podForceDeleteGracePeriod.
-	// This is equivalent to the `--force --grace-period=0` flag of `kubectl delete pod`.
+	// The deletion done is equivalent to the `--now` or the `--grace-period=1` flag of `kubectl delete pod`.
+	// We do not use `--force --grace-period=0`, if doing so the pod would be dropped from the API without being killed on the node.
+	// Such pods do block the reboot of the node and the node will stay in a `NotReady` state for extended periods.
 	// A zero value disables the force delete.
 	PodForceDeleteGracePeriod metav1.Duration `json:"podForceDeleteGracePeriod"`
 }
