@@ -124,14 +124,10 @@ func main() {
 		ManagedClusterVersionName:      managedClusterVersionName,
 		ManagedClusterVersionNamespace: managedClusterVersionNamespace,
 	})
-
-	if err = (&controllers.NodeReconciler{
+	metrics.Registry.MustRegister(&controllers.NodeCollector{
 		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Node")
-		os.Exit(1)
-	}
+	})
+
 	if err = (&controllers.ClusterVersionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
