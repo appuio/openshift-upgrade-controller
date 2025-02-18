@@ -26,6 +26,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	configv1 "github.com/openshift/api/config/v1"
+	machinev1beta1 "github.com/openshift/api/machine/v1beta1"
 	machineconfigurationv1 "github.com/openshift/api/machineconfiguration/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -52,6 +53,7 @@ func init() {
 	utilruntime.Must(configv1.AddToScheme(scheme))
 	utilruntime.Must(batchv1.AddToScheme(scheme))
 	utilruntime.Must(machineconfigurationv1.AddToScheme(scheme))
+	utilruntime.Must(machinev1beta1.AddToScheme(scheme))
 
 	utilruntime.Must(managedupgradev1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
