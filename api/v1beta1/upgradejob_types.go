@@ -148,7 +148,7 @@ type HookJobTracker struct {
 	// HookEvent is the event of the hook
 	HookEvent string `json:"hookEvent,omitempty"`
 	// TrackingKey is an additional key to track the hook.
-	// Should be unique events that must run multiple times.
+	// Should be unique for events that may run multiple times.
 	// The event emitter is responsible for ensuring the uniqueness of the key.
 	// Events that are run only once per upgrade job can omit this key.
 	TrackingKey string `json:"trackingKey,omitempty"`
