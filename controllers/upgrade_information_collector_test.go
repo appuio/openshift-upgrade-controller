@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -244,9 +243,9 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 		StartedTime: metav1.Now(),
 		Version:     version.Spec.DesiredUpdate.Version,
 	})
-	require.NoError(t, c.Status().Update(context.Background(), version))
+	require.NoError(t, c.Status().Update(t.Context(), version))
 	workerPool.Status.UpdatedMachineCount = workerPool.Status.MachineCount - 1
-	require.NoError(t, c.Status().Update(context.Background(), workerPool))
+	require.NoError(t, c.Status().Update(t.Context(), workerPool))
 
 	require.NoError(t,
 		testutil.CollectAndCompare(subject, expectedUpgradingMetrics(true, false, true), expectedMetricNames...),
@@ -254,7 +253,7 @@ func Test_ClusterUpgradingMetric(t *testing.T) {
 	)
 
 	workerPool.Status.UpdatedMachineCount = workerPool.Status.MachineCount
-	require.NoError(t, c.Status().Update(context.Background(), workerPool))
+	require.NoError(t, c.Status().Update(t.Context(), workerPool))
 
 	require.NoError(t,
 		testutil.CollectAndCompare(subject, expectedUpgradingMetrics(false, false, false), expectedMetricNames...),

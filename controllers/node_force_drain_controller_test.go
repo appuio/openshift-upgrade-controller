@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 )
 
 func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
-	ctx := log.IntoContext(context.Background(), testr.New(t))
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 
 	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.Local)}
 	t.Log("Now: ", clock.Now())
@@ -227,7 +226,7 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 }
 
 func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSetsStaticPods(t *testing.T) {
-	ctx := log.IntoContext(context.Background(), testr.New(t))
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 
 	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.Local)}
 	t.Log("Now: ", clock.Now())
@@ -378,7 +377,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSetsStaticP
 }
 
 func Test_NodeForceDrainReconciler_Reconcile_MaxIntervalDuringActiveDrain(t *testing.T) {
-	ctx := log.IntoContext(context.Background(), testr.New(t))
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 
 	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.Local)}
 	t.Log("Now: ", clock.Now())
@@ -451,6 +450,8 @@ func Test_NodeForceDrainReconciler_Reconcile_MaxIntervalDuringActiveDrain(t *tes
 }
 
 func Test_NodeToNodeForceDrainMapper(t *testing.T) {
+	ctx := log.IntoContext(t.Context(), testr.New(t))
+
 	fds := []client.Object{
 		&managedupgradev1beta1.NodeForceDrain{
 			ObjectMeta: metav1.ObjectMeta{
@@ -517,7 +518,7 @@ func Test_NodeToNodeForceDrainMapper(t *testing.T) {
 		},
 	}
 
-	require.ElementsMatch(t, subject(context.Background(), node), []reconcile.Request{
+	require.ElementsMatch(t, subject(ctx, node), []reconcile.Request{
 		{NamespacedName: client.ObjectKeyFromObject(fds[0])},
 		{NamespacedName: client.ObjectKeyFromObject(fds[1])},
 	}, "should only return NodeForceDrain objects matching the input node")

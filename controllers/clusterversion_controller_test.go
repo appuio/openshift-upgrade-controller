@@ -1,16 +1,17 @@
 package controllers
 
 import (
-	"context"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/testr"
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
@@ -18,7 +19,7 @@ import (
 
 func Test_ClusterVersionReconciler_Reconcile(t *testing.T) {
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 
 	upstream := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{

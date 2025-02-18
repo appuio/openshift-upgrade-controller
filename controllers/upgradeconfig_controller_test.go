@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/testr"
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,13 +19,14 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 )
 
 func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.UTC)}
 	t.Log("Now: ", clock.Now())
 	require.Equal(t, 14, func() int { _, isoweek := clock.Now().ISOWeek(); return isoweek }())
@@ -215,7 +217,7 @@ func Test_UpgradeConfigReconciler_Reconcile_E2E(t *testing.T) {
 }
 
 func Test_UpgradeConfigReconciler_Reconcile_AddNextWindowsToStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.UTC)}
 	t.Log("Now: ", clock.Now())
 	require.Equal(t, 14, func() int { _, isoweek := clock.Now().ISOWeek(); return isoweek }())
@@ -284,7 +286,7 @@ func Test_UpgradeConfigReconciler_Reconcile_AddNextWindowsToStatus(t *testing.T)
 }
 
 func Test_UpgradeConfigReconciler_Reconcile_SuspendedByWindow(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.UTC)}
 	t.Log("Now: ", clock.Now())
 	require.Equal(t, 14, func() int { _, isoweek := clock.Now().ISOWeek(); return isoweek }())
@@ -414,7 +416,7 @@ func requireEventMatches(t *testing.T, recorder *record.FakeRecorder, substrings
 }
 
 func Test_UpgradeConfigReconciler_Reconcile_CleanupSuccessfulJobs(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -525,7 +527,7 @@ func requireTimeEqual(t *testing.T, expected, actual time.Time, msgAndArgs ...an
 func listJobs(t *testing.T, c client.Client, namespace string) []managedupgradev1beta1.UpgradeJob {
 	t.Helper()
 	var jobs managedupgradev1beta1.UpgradeJobList
-	require.NoError(t, c.List(context.Background(), &jobs, client.InNamespace(namespace)))
+	require.NoError(t, c.List(t.Context(), &jobs, client.InNamespace(namespace)))
 	return jobs.Items
 }
 

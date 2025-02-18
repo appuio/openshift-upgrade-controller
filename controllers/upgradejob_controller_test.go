@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr/testr"
 	configv1 "github.com/openshift/api/config/v1"
 	machineconfigurationv1 "github.com/openshift/api/machineconfiguration/v1"
 	"github.com/stretchr/testify/require"
@@ -23,12 +24,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 )
 
 func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -326,7 +328,7 @@ func Test_UpgradeJobReconciler_Reconcile_E2E_Upgrade(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_Skipped_Job(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -441,7 +443,7 @@ func Test_UpgradeJobReconciler_Reconcile_Skipped_Job(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_EmptyDesiredVersion(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	upgradeJob := &managedupgradev1beta1.UpgradeJob{
@@ -503,7 +505,7 @@ func Test_UpgradeJobReconciler_Reconcile_EmptyDesiredVersion(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_HookFailed(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	upgradeJob := &managedupgradev1beta1.UpgradeJob{
@@ -791,7 +793,7 @@ func Test_UpgradeJobReconciler_Reconcile_Disruptive(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_ClaimNextHook(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	upgradeJob := &managedupgradev1beta1.UpgradeJob{
@@ -882,7 +884,7 @@ func requireEnv(t *testing.T, list []corev1.EnvVar, name string, valueMatcher fu
 }
 
 func Test_UpgradeJobReconciler_Reconcile_Expired(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	upgradeJob := &managedupgradev1beta1.UpgradeJob{
@@ -916,7 +918,7 @@ func Test_UpgradeJobReconciler_Reconcile_Expired(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -976,7 +978,7 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -1031,7 +1033,7 @@ func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -1095,7 +1097,7 @@ func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -1168,7 +1170,7 @@ func Test_UpgradeJobReconciler_Reconcile_PostHealthCheckTimeout(t *testing.T) {
 }
 
 func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -1365,7 +1367,7 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools(t *testing.T) 
 }
 
 func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_UnpauseExpire(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -1486,7 +1488,7 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_UnpauseExpire(
 // Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_EnsureUnpause tests that the upgrade job reconciler
 // will unpause machine config pools at the end of an upgrade even if they did not require any upgrades
 func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_EnsureUnpause(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
 	ucv := &configv1.ClusterVersion{
@@ -1621,6 +1623,8 @@ func Test_UpgradeJobReconciler_Reconcile_PausedMachineConfigPools_EnsureUnpause(
 }
 
 func Test_JobFromClusterVersionHandler(t *testing.T) {
+	ctx := log.IntoContext(t.Context(), testr.New(t))
+
 	ucv := &configv1.ClusterVersion{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "version",
@@ -1630,14 +1634,14 @@ func Test_JobFromClusterVersionHandler(t *testing.T) {
 	client := controllerClient(t, ucv)
 	subject := JobFromClusterVersionMapper(client, "version")
 
-	require.Len(t, subject(context.Background(), nil), 0, "should not return a reconcile request if clusterversion is not locked")
+	require.Len(t, subject(ctx, nil), 0, "should not return a reconcile request if clusterversion is not locked")
 
 	ucv.Annotations = map[string]string{
 		JobLockAnnotation: "ns/upgrade-1234-4-5-13",
 	}
-	require.NoError(t, client.Update(context.Background(), ucv))
+	require.NoError(t, client.Update(ctx, ucv))
 
-	reqs := subject(context.Background(), nil)
+	reqs := subject(ctx, nil)
 	require.Len(t, reqs, 1, "should return a reconcile request if clusterversion is locked")
 	require.Equal(t, types.NamespacedName{Namespace: "ns", Name: "upgrade-1234-4-5-13"}, reqs[0].NamespacedName)
 }
@@ -1738,7 +1742,7 @@ func nodeNameIndexer(obj client.Object) []string {
 
 func checkAndCompleteHook(t *testing.T, c client.WithWatch, subject *UpgradeJobReconciler, upgradeJob *managedupgradev1beta1.UpgradeJob, upgradeJobHook *managedupgradev1beta1.UpgradeJobHook, event managedupgradev1beta1.UpgradeEvent, trackingKey string, fail bool) batchv1.Job {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var jobs batchv1.JobList
 

@@ -1,20 +1,21 @@
 package controllers
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
+	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func Test_UpgradeSuspensionWindowReconciler_Reconcile(t *testing.T) {
-	ctx := context.Background()
+	ctx := log.IntoContext(t.Context(), testr.New(t))
 
 	j1 := &managedupgradev1beta1.UpgradeJob{
 		ObjectMeta: metav1.ObjectMeta{
