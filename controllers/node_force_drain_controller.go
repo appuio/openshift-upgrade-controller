@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,6 +50,9 @@ type NodeForceDrainReconciler struct {
 	// It is used to avoid caching all pods in the controller.
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
+
+	// Recorder is used to record pod deletion events on nodes.
+	Recorder record.EventRecorder
 
 	Clock Clock
 
@@ -250,6 +254,7 @@ func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node core
 		}
 		l.Info("Deleting pod", "pod", pod.Name, "podNamespace", pod.Namespace)
 		attemptedDeletion = true
+		r.Recorder.Eventf(&node, corev1.EventTypeWarning, "NodeDrainDeletePod", "Deleting pod %q in namespace %q", pod.Name, pod.Namespace)
 		if err := r.Delete(ctx, &pod); err != nil {
 			deletionErrs = append(deletionErrs, err)
 		}
@@ -287,7 +292,8 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 			continue
 		}
 
-		l.Info("Force deleting pod")
+		l.Info("Forcing pod termination")
+		r.Recorder.Eventf(&node, corev1.EventTypeWarning, "NodeDrainForcingPodTermination", "Forcing pod termination: Deleting pod %q in namespace %q with grace period of 1.", pod.Name, pod.Namespace)
 		if err := r.Delete(ctx, &pod, &client.DeleteOptions{
 			// As far is I was able to find a grace period of 0 will leave the hanging pod on the node and block the reboot of the node.
 			// Therefore we set a grace period of 1 second for the quickest possible deletion.

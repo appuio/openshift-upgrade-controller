@@ -252,11 +252,10 @@ func Test_UpgradeConfigReconciler_Reconcile_AddNextWindowsToStatus(t *testing.T)
 
 	client := controllerClient(t, ucv, upgradeConfig)
 
-	recorder := record.NewFakeRecorder(5)
 	subject := &UpgradeConfigReconciler{
 		Client:   client,
 		Scheme:   client.Scheme(),
-		Recorder: recorder,
+		Recorder: newFakeRecorder(),
 
 		Clock: &clock,
 
@@ -345,7 +344,7 @@ func Test_UpgradeConfigReconciler_Reconcile_SuspendedByWindow(t *testing.T) {
 
 	client := controllerClient(t, ucv, upgradeConfig, suspensionWindow)
 
-	recorder := record.NewFakeRecorder(5)
+	recorder := newFakeRecorder()
 	subject := &UpgradeConfigReconciler{
 		Client:   client,
 		Scheme:   client.Scheme(),
@@ -486,11 +485,10 @@ func Test_UpgradeConfigReconciler_Reconcile_CleanupSuccessfulJobs(t *testing.T) 
 		}
 	}
 
-	recorder := record.NewFakeRecorder(5)
 	subject := &UpgradeConfigReconciler{
 		Client:   client,
 		Scheme:   client.Scheme(),
-		Recorder: recorder,
+		Recorder: newFakeRecorder(),
 
 		Clock: &clock,
 
@@ -529,6 +527,10 @@ func listJobs(t *testing.T, c client.Client, namespace string) []managedupgradev
 	var jobs managedupgradev1beta1.UpgradeJobList
 	require.NoError(t, c.List(t.Context(), &jobs, client.InNamespace(namespace)))
 	return jobs.Items
+}
+
+func newFakeRecorder() *record.FakeRecorder {
+	return record.NewFakeRecorder(100)
 }
 
 func reconcileNTimes(t *testing.T, subject reconcile.Reconciler, ctx context.Context, req reconcile.Request, n int) (lastResult reconcile.Result) {
