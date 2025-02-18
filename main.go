@@ -86,6 +86,9 @@ func main() {
 	var nodeDrainReconcileInterval time.Duration
 	flag.DurationVar(&nodeDrainReconcileInterval, "node-drain-reconcile-interval", 3*time.Minute, "The interval at which to reconcile the node force drainer during active node drains. This is a safety mechanism to guard against edge cases, such as daemonsets orphaning pods, or programming errors in the node force drainer. Set to zero to disable this safety mechanism.")
 
+	var machineNamespace string
+	flag.StringVar(&machineNamespace, "machine-namespace", "openshift-machine-api", "The namespace where the machines are located.")
+
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -126,6 +129,10 @@ func main() {
 	})
 	metrics.Registry.MustRegister(&controllers.NodeCollector{
 		Client: mgr.GetClient(),
+	})
+	metrics.Registry.MustRegister(&controllers.MachineCollector{
+		Client:           mgr.GetClient(),
+		MachineNamespace: machineNamespace,
 	})
 
 	if err = (&controllers.ClusterVersionReconciler{
