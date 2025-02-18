@@ -102,10 +102,12 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 
 	cli := controllerClient(t, node1, node2, drainingStorageNode, stuckPodOnDrainingStorageNode, forceDrain, podOnNode1, podToForceDeleteOnNode1)
 
+	recorder := newFakeRecorder()
 	subject := &NodeForceDrainReconciler{
 		Client:    cli,
 		APIReader: cli,
 		Scheme:    cli.Scheme(),
+		Recorder:  recorder,
 
 		Clock: &clock,
 	}
@@ -166,6 +168,8 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 
 		var deletedPod corev1.Pod
 		require.Error(t, cli.Get(ctx, client.ObjectKeyFromObject(podOnNode1), &deletedPod), "pod should have been deleted")
+
+		requireEventMatches(t, recorder, `Warning NodeDrainDeletePod Deleting pod "pod-on-node1" in namespace "default"`)
 	})
 
 	t.Log("We can't control the clock used for DeletionTimestamp so there's a sequence break here. We will test force deletion at the end by skipping to real time.")
@@ -187,6 +191,8 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 
 		var deletedPod corev1.Pod
 		require.Error(t, cli.Get(ctx, client.ObjectKeyFromObject(podToForceDeleteOnNode1), &deletedPod), "pod should have been deleted")
+
+		requireEventMatches(t, recorder, `Warning NodeDrainForcingPodTermination Forcing pod termination: Deleting pod "pod-on-node1-force-delete" in namespace "default" with grace period of 1.`)
 	})
 
 	step(t, "nodes stop draining", func(t *testing.T) {
@@ -356,6 +362,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSetsStaticP
 		Client:    cli,
 		APIReader: cli,
 		Scheme:    cli.Scheme(),
+		Recorder:  newFakeRecorder(),
 
 		Clock: &clock,
 	}
@@ -423,6 +430,7 @@ func Test_NodeForceDrainReconciler_Reconcile_MaxIntervalDuringActiveDrain(t *tes
 		Client:    cli,
 		APIReader: cli,
 		Scheme:    cli.Scheme(),
+		Recorder:  newFakeRecorder(),
 
 		Clock: &clock,
 	}
