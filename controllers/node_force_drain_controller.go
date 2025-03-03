@@ -68,6 +68,7 @@ type NodeForceDrainReconciler struct {
 //+kubebuilder:rbac:groups="apps",resources=daemonsets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=nodeforcedrains,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=nodeforcedrains/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile reacts to Node changes and force drains nodes after a certain period of time.
 func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
