@@ -72,7 +72,6 @@ func main() {
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
 
 	defaultNamespace := "default"
 	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
@@ -90,6 +89,8 @@ func main() {
 
 	var machineNamespace string
 	flag.StringVar(&machineNamespace, "machine-namespace", "openshift-machine-api", "The namespace where the machines are located.")
+
+	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
