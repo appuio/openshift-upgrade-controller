@@ -33,6 +33,8 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -84,6 +86,9 @@ func main() {
 	flag.StringVar(&managedClusterVersionName, "managed-cluster-version-name", "version", "The name of the ClusterVersion object to manage.")
 	flag.StringVar(&managedClusterVersionNamespace, "managed-cluster-version-namespace", defaultNamespace, "The namespace of the ClusterVersion object to manage.")
 
+	var namespace string
+	flag.StringVar(&namespace, "namespace", defaultNamespace, "The namespace where the controller should reconcile objects. This is used to limit the scope of the controller to a specific namespace. If explicitly set to \"\", the controller will reconcile objects in all namespaces.")
+
 	var nodeDrainReconcileInterval time.Duration
 	flag.DurationVar(&nodeDrainReconcileInterval, "node-drain-reconcile-interval", 3*time.Minute, "The interval at which to reconcile the node force drainer during active node drains. This is a safety mechanism to guard against edge cases, such as daemonsets orphaning pods, or programming errors in the node force drainer. Set to zero to disable this safety mechanism.")
 
@@ -93,6 +98,26 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	cacheOpts := cache.Options{
+		ByObject: map[client.Object]cache.ByObject{
+			&machinev1beta1.Machine{}: {
+				Namespaces: map[string]cache.Config{
+					machineNamespace: {},
+				},
+			},
+			&managedupgradev1beta1.ClusterVersion{}: {
+				Namespaces: map[string]cache.Config{
+					managedClusterVersionNamespace: {},
+				},
+			},
+		},
+	}
+	if namespace != "" {
+		cacheOpts.DefaultNamespaces = map[string]cache.Config{
+			defaultNamespace: {},
+		}
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -113,6 +138,7 @@ func main() {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
+		Cache: cacheOpts,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
