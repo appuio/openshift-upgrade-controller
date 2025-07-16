@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -975,6 +976,66 @@ func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn(t *testing.T) {
 	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonUpgradeWithdrawn, failedCond.Reason)
 	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
 	require.Empty(t, ucv.Annotations[JobLockAnnotation], "should clear lock annotation")
+}
+
+func Test_UpgradeJobReconciler_Reconcile_UpgradeWithdrawn_NoCheckAvailability(t *testing.T) {
+	ctx := log.IntoContext(t.Context(), testr.New(t))
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+		Spec: configv1.ClusterVersionSpec{
+			ClusterID: "9b588658-9671-429c-a762-34106da5795f",
+			DesiredUpdate: &configv1.Update{
+				Version: "4.5.12",
+				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d732fee6462de7f04f9432f1bb3925f57554db1d8c8d6f3138eea70e5787c7ae",
+			},
+		},
+		Status: configv1.ClusterVersionStatus{},
+	}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore:                     metav1.NewTime(clock.Now().Add(time.Hour)),
+			StartAfter:                      metav1.NewTime(clock.Now().Add(-time.Hour)),
+			DesiredVersionCheckAvailability: ptr.To(false),
+			DesiredVersion: &configv1.Update{
+				Version: "4.5.13",
+				Image:   "quay.io/openshift-release-dev/ocp-release@sha256:d094f1952995b3c5fd8e0b19b128905931e1e8fdb4b6cb377857ab0dfddcff47",
+			},
+			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				UpgradeTimeout: metav1.Duration{Duration: 12 * time.Hour},
+				PreUpgradeHealthChecks: managedupgradev1beta1.UpgradeJobHealthCheck{
+					SkipDegradedOperatorsCheck: true,
+				},
+			},
+		},
+	}
+
+	client := controllerClient(t, ucv, upgradeJob)
+
+	subject := &UpgradeJobReconciler{
+		Client: client,
+		Scheme: client.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 10)
+
+	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	failedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
+	require.Nil(t, failedCond, "should not fail")
+	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+	require.Equal(t, upgradeJob.Spec.DesiredVersion.Version, ucv.Spec.DesiredUpdate.Version, "should update cluster version")
 }
 
 func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {

@@ -801,6 +801,11 @@ func (in *UpgradeJobSpec) DeepCopyInto(out *UpgradeJobSpec) {
 		*out = new(configv1.Update)
 		**out = **in
 	}
+	if in.DesiredVersionCheckAvailability != nil {
+		in, out := &in.DesiredVersionCheckAvailability, &out.DesiredVersionCheckAvailability
+		*out = new(bool)
+		**out = **in
+	}
 	in.UpgradeJobConfig.DeepCopyInto(&out.UpgradeJobConfig)
 }
 
