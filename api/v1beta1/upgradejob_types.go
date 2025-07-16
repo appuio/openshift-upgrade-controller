@@ -72,8 +72,24 @@ type UpgradeJobSpec struct {
 	// +optional
 	DesiredVersion *configv1.Update `json:"desiredVersion,omitempty"`
 
+	// DesiredVersionCheckAvailability defines whether to check if the desired version is available at the start of the upgrade.
+	// This is done by searching the ClusterVersion status for the desired version.
+	// If set to true, the upgrade job will fail with reason UpgradeJobReasonUpgradeWithdrawn if the desired version is not available.
+	// If set to false, the upgrade job will not check for the availability of the desired version and will apply the DesiredVersion directly.
+	// Defaults to true.
+	// +optional
+	DesiredVersionCheckAvailability *bool `json:"desiredVersionCheckAvailability,omitempty"`
+
 	// UpgradeJobConfig defines the configuration for the upgrade job
 	UpgradeJobConfig `json:"config"`
+}
+
+// GetDesiredVersionCheckAvailability returns DesiredVersionCheckAvailability with a default value of true if nil.
+func (s UpgradeJobSpec) GetDesiredVersionCheckAvailability() bool {
+	if s.DesiredVersionCheckAvailability == nil {
+		return true
+	}
+	return *s.DesiredVersionCheckAvailability
 }
 
 // UpgradeJobConfig defines the configuration for the upgrade job

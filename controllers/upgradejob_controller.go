@@ -226,8 +226,8 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 	if uj.Spec.DesiredVersion != nil {
 		// Check if the desired version is already set
 		if version.Spec.DesiredUpdate == nil || *version.Spec.DesiredUpdate != *uj.Spec.DesiredVersion {
-			update := clusterversion.FindAvailableUpdate(version, uj.Spec.DesiredVersion.Image, uj.Spec.DesiredVersion.Version)
-			if update == nil {
+			if uj.Spec.GetDesiredVersionCheckAvailability() &&
+				clusterversion.FindAvailableUpdate(version, uj.Spec.DesiredVersion.Image, uj.Spec.DesiredVersion.Version) == nil {
 				r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 					Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
 					Status:  metav1.ConditionTrue,

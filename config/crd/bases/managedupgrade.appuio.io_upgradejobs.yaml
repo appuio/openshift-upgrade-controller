@@ -214,6 +214,14 @@ spec:
                 - message: Version must be set if Architecture is set
                   rule: 'has(self.architecture) && self.architecture != '''' ? self.version
                     != '''' : true'
+              desiredVersionCheckAvailability:
+                description: |-
+                  DesiredVersionCheckAvailability defines whether to check if the desired version is available at the start of the upgrade.
+                  This is done by searching the ClusterVersion status for the desired version.
+                  If set to true, the upgrade job will fail with reason UpgradeJobReasonUpgradeWithdrawn if the desired version is not available.
+                  If set to false, the upgrade job will not check for the availability of the desired version and will apply the DesiredVersion directly.
+                  Defaults to true.
+                type: boolean
               startAfter:
                 description: StartAfter defines the time after which the upgrade job
                   should start
