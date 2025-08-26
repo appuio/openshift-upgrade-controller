@@ -7,8 +7,11 @@ import (
 // NodeForceDrainSpec defines the desired state of NodeForceDrain
 type NodeForceDrainSpec struct {
 	// NodeSelector is a selector to select which nodes to drain
-	// A nil selector matches no nodes, while an empty selector matches all nodes.
-	NodeSelector *metav1.LabelSelector `json:"nodeSelector"`
+	// An empty selector matches all nodes.
+	NodeSelector metav1.LabelSelector `json:"nodeSelector"`
+	// NamespaceSelector is a selector to select which namespaces to drain
+	// An empty selector matches all namespaces.
+	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 	// NodeDrainGracePeriod is the duration until the controller starts to delete pods on the node.
 	// The duration is calculated from the OpenShist node drain annotation.
 	// This circumvents the eviction API and means that PDBs are ignored.

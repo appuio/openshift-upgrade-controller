@@ -64,6 +64,7 @@ type NodeForceDrainReconciler struct {
 }
 
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
 //+kubebuilder:rbac:groups="apps",resources=daemonsets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=nodeforcedrains,verbs=get;list;watch;update;patch
@@ -82,17 +83,18 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	if fd.Spec.NodeSelector == nil {
-		return ctrl.Result{}, nil
-	}
-
 	var nodes corev1.NodeList
-	nodeSel, err := metav1.LabelSelectorAsSelector(fd.Spec.NodeSelector)
+	nodeSel, err := metav1.LabelSelectorAsSelector(&fd.Spec.NodeSelector)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to parse NodeSelector: %w", err)
 	}
 	if err := r.List(ctx, &nodes, client.MatchingLabelsSelector{Selector: nodeSel}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	podNSSelector, err := metav1.LabelSelectorAsSelector(&fd.Spec.NamespaceSelector)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to parse NamespaceSelector: %w", err)
 	}
 
 	// Check for draining nodes, using the node drainer annotations.
@@ -156,7 +158,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force draining node", "node", node.Name)
-			deleted, err := r.forceDrainNode(ctx, node)
+			deleted, err := r.forceDrainNode(ctx, node, podNSSelector)
 			if deleted {
 				didDeletePod = true
 			}
@@ -174,7 +176,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force deleting pods on node", "node", node.Name)
-			if t, err := r.forceDeletePodsOnNode(ctx, node, pfd); err != nil {
+			if t, err := r.forceDeletePodsOnNode(ctx, node, pfd, podNSSelector); err != nil {
 				errors = append(errors, fmt.Errorf("failed to force delete pods on node %s: %w", node.Name, err))
 			} else if t > 0 && (timeUntilNextPodForceDelete == 0 || t < timeUntilNextPodForceDelete) {
 				timeUntilNextPodForceDelete = t
@@ -239,10 +241,10 @@ func (r *NodeForceDrainReconciler) setLastObservedNodeDrain(fd *managedupgradev1
 
 // forceDrainNode deletes all pods on the node.
 // Returns true if there was an attempt to delete a pod and any errors that occurred.
-func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node corev1.Node) (bool, error) {
+func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node corev1.Node, podNSSelector labels.Selector) (bool, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.forceDrainNode").WithValues("node", node.Name)
 
-	pods, err := r.getDeletionCandidatePodsForNode(ctx, node)
+	pods, err := r.getDeletionCandidatePodsForNode(ctx, node, podNSSelector)
 	if err != nil {
 		return false, fmt.Errorf("failed to get deletion candidate pods for node %s: %w", node.Name, err)
 	}
@@ -267,10 +269,10 @@ func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node core
 // forceDeletePodsOnNode deletes all pods on the node.
 // Returns the time until the next force delete and any errors that occurred.
 // A time of 0 means that there are no pods to force delete.
-func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, node corev1.Node, gracePeriod time.Duration) (time.Duration, error) {
+func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, node corev1.Node, gracePeriod time.Duration, podNSSelector labels.Selector) (time.Duration, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.forceDeletePodsOnNode").WithValues("node", node.Name)
 
-	pods, err := r.getDeletionCandidatePodsForNode(ctx, node)
+	pods, err := r.getDeletionCandidatePodsForNode(ctx, node, podNSSelector)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get deletion candidate pods for node %s: %w", node.Name, err)
 	}
@@ -312,7 +314,7 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 
 // getDeletionCandidatePodsForNode returns a list of pods on the node that are not controlled by an active DaemonSet.
 // Pods controlled by an active DaemonSet are not returned.
-func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.Context, node corev1.Node) ([]corev1.Pod, error) {
+func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.Context, node corev1.Node, podNSSelector labels.Selector) ([]corev1.Pod, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.getDeletionCandidatePodsForNode").WithValues("node", node.Name)
 
 	// We use the API directly to avoid caching all pods in the controller.
@@ -331,6 +333,28 @@ func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.C
 	filteredPods := make([]corev1.Pod, 0, len(pods.Items))
 	for _, pod := range pods.Items {
 		l := l.WithValues("pod", pod.Name, "podNamespace", pod.Namespace)
+
+		if !podNSSelector.Empty() {
+			var ns corev1.Namespace
+			if err := r.Get(ctx, client.ObjectKey{Name: pod.Namespace}, &ns); err != nil {
+				l.Error(err, "Failed to get namespace for pod")
+				ignoredPods = append(ignoredPods, ignoredPod{
+					Name:      pod.Name,
+					Namespace: pod.Namespace,
+					Reason:    "error getting namespace",
+				})
+				continue
+			}
+			if !podNSSelector.Matches(labels.Set(ns.Labels)) {
+				ignoredPods = append(ignoredPods, ignoredPod{
+					Name:      pod.Name,
+					Namespace: pod.Namespace,
+					Reason:    "namespace does not match",
+				})
+				continue
+			}
+		}
+
 		controlledByActiveDaemonSet, err := r.podIsControlledByExistingDaemonSet(ctx, pod)
 		if err != nil {
 			l.Error(err, "Failed to check if pod is controlled by active DaemonSet")
@@ -434,10 +458,7 @@ func NodeToNodeForceDrainMapper(c client.Reader) handler.TypedMapFunc[*corev1.No
 		for _, fd := range fds.Items {
 			l := l.WithValues("force_node_drain_name", fd.Name, "force_node_drain_namespace", fd.Namespace)
 
-			if fd.Spec.NodeSelector == nil {
-				continue
-			}
-			sel, err := metav1.LabelSelectorAsSelector(fd.Spec.NodeSelector)
+			sel, err := metav1.LabelSelectorAsSelector(&fd.Spec.NodeSelector)
 			if err != nil {
 				l.Error(err, "failed to parse NodeSelector")
 				continue

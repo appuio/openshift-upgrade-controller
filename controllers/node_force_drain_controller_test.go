@@ -92,7 +92,7 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: managedupgradev1beta1.NodeForceDrainSpec{
-			NodeSelector: &metav1.LabelSelector{
+			NodeSelector: metav1.LabelSelector{
 				MatchLabels: node1.Labels,
 			},
 			NodeDrainGracePeriod:      metav1.Duration{Duration: 1 * time.Hour},
@@ -339,7 +339,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSetsStaticP
 			Namespace: "default",
 		},
 		Spec: managedupgradev1beta1.NodeForceDrainSpec{
-			NodeSelector: &metav1.LabelSelector{
+			NodeSelector: metav1.LabelSelector{
 				MatchLabels: drainingNode.Labels,
 			},
 			NodeDrainGracePeriod: metav1.Duration{Duration: 1 * time.Hour},
@@ -408,7 +408,7 @@ func Test_NodeForceDrainReconciler_Reconcile_MaxIntervalDuringActiveDrain(t *tes
 			Namespace: "default",
 		},
 		Spec: managedupgradev1beta1.NodeForceDrainSpec{
-			NodeSelector: &metav1.LabelSelector{
+			NodeSelector: metav1.LabelSelector{
 				MatchLabels: drainingNode.Labels,
 			},
 			NodeDrainGracePeriod: metav1.Duration{Duration: 1 * time.Hour},
@@ -467,7 +467,7 @@ func Test_NodeToNodeForceDrainMapper(t *testing.T) {
 				Name:      "fd-direct-match",
 			},
 			Spec: managedupgradev1beta1.NodeForceDrainSpec{
-				NodeSelector: &metav1.LabelSelector{
+				NodeSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"im-important": "true",
 					},
@@ -480,7 +480,7 @@ func Test_NodeToNodeForceDrainMapper(t *testing.T) {
 				Name:      "fd-direct-match-exp",
 			},
 			Spec: managedupgradev1beta1.NodeForceDrainSpec{
-				NodeSelector: &metav1.LabelSelector{
+				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
 							Key:      "im-important",
@@ -492,20 +492,11 @@ func Test_NodeToNodeForceDrainMapper(t *testing.T) {
 		},
 		&managedupgradev1beta1.NodeForceDrain{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "fd-selector-nil",
-				Namespace: "default",
-			},
-			Spec: managedupgradev1beta1.NodeForceDrainSpec{
-				NodeSelector: nil,
-			},
-		},
-		&managedupgradev1beta1.NodeForceDrain{
-			ObjectMeta: metav1.ObjectMeta{
 				Name:      "fd-selector-no-match",
 				Namespace: "default",
 			},
 			Spec: managedupgradev1beta1.NodeForceDrainSpec{
-				NodeSelector: &metav1.LabelSelector{
+				NodeSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"other-selector": "true",
 					},
