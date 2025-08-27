@@ -537,7 +537,13 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainOnlyMatchingPod(t *testing.T) 
 			Containers: []corev1.Container{
 				{
 					Name:  "container-1",
+					Image: "sidecar:latest",
+				}, {
+					Name:  "container-2",
 					Image: "oktodrain:latest",
+				}, {
+					Name:  "container-3",
+					Image: "other-sidecar:latest",
 				},
 			},
 		},
@@ -556,6 +562,14 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainOnlyMatchingPod(t *testing.T) 
 			},
 		},
 	}
+	podNonBool := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-non-bool",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+		},
+	}
 
 	forceDrain := &managedupgradev1beta1.NodeForceDrain{
 		ObjectMeta: metav1.ObjectMeta{
@@ -563,7 +577,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainOnlyMatchingPod(t *testing.T) 
 			Namespace: "default",
 		},
 		Spec: managedupgradev1beta1.NodeForceDrainSpec{
-			PodJQSelector:        `if .metadata.name | test("error") then (.metadata.name | halt_error) else [.spec.containers[] | select(.image | test("oktodrain"))] | length > 0 end`,
+			PodJQSelector:        `if .metadata.name | test("error") then (.metadata.name | halt_error) elif .metadata.name | test("non-bool") then "blub" else .spec.containers[] | .image | test("oktodrain") end`,
 			NodeDrainGracePeriod: metav1.Duration{Duration: 1 * time.Hour},
 		},
 		Status: managedupgradev1beta1.NodeForceDrainStatus{
@@ -577,7 +591,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainOnlyMatchingPod(t *testing.T) 
 		},
 	}
 
-	cli := controllerClient(t, forceDrain, drainingNode, otherPod, podMatchingExpression, podQueryError)
+	cli := controllerClient(t, forceDrain, drainingNode, otherPod, podMatchingExpression, podQueryError, podNonBool)
 
 	subject := &NodeForceDrainReconciler{
 		Client:    cli,
@@ -590,7 +604,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainOnlyMatchingPod(t *testing.T) 
 
 	var pods corev1.PodList
 	require.NoError(t, cli.List(ctx, &pods))
-	require.Len(t, pods.Items, 3, "precondition: all testing pods should be present")
+	require.Len(t, pods.Items, 4, "precondition: all testing pods should be present")
 
 	_, err := subject.Reconcile(ctx, requestForObject(forceDrain))
 	require.NoError(t, err)
@@ -601,7 +615,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainOnlyMatchingPod(t *testing.T) 
 	for _, pod := range podsAfterDrain.Items {
 		podNames = append(podNames, pod.Name)
 	}
-	require.ElementsMatch(t, podNames, []string{otherPod.Name, podQueryError.Name}, "pod with non-matching selectors and erroring selectors should be left alone")
+	require.ElementsMatch(t, podNames, []string{otherPod.Name, podQueryError.Name, podNonBool.Name}, "pod with non-matching selectors and erroring selectors should be left alone")
 }
 
 func Test_NodeForceDrainReconciler_Reconcile_MaxIntervalDuringActiveDrain(t *testing.T) {

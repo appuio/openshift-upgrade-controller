@@ -167,7 +167,8 @@ spec:
                   If the program is halted - due to error or explicit `halt` - after a truthy boolean is returned, the pod will be drained.
                   Examples:
                     .metadata.namespace | test("-dev$")
-                    [.spec.containers[] | select(.image | test("oktodrain"))] | length > 0
+                    .spec.containers[] | .image | test("oktodrain")
+                    [.spec.containers[] | .image | test("oktodrain")] | all
                 type: string
             required:
             - nodeDrainGracePeriod

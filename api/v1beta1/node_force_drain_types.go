@@ -23,7 +23,8 @@ type NodeForceDrainSpec struct {
 	// If the program is halted - due to error or explicit `halt` - after a truthy boolean is returned, the pod will be drained.
 	// Examples:
 	//   .metadata.namespace | test("-dev$")
-	//   [.spec.containers[] | select(.image | test("oktodrain"))] | length > 0
+	//   .spec.containers[] | .image | test("oktodrain")
+	//   [.spec.containers[] | .image | test("oktodrain")] | all
 	PodJQSelector string `json:"podJQSelector,omitempty"`
 	// NodeDrainGracePeriod is the duration until the controller starts to delete pods on the node.
 	// The duration is calculated from the OpenShist node drain annotation.
