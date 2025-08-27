@@ -447,7 +447,9 @@ func (r *NodeForceDrainReconciler) podJQQueryMatches(ctx context.Context, pod co
 	}
 
 	matches := false
-	iter := podJQQuery.RunWithContext(ctx, rawPod)
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	iter := podJQQuery.RunWithContext(runCtx, rawPod)
 	for {
 		v, ok := iter.Next()
 		if !ok {
