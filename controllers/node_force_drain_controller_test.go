@@ -92,7 +92,7 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: managedupgradev1beta1.NodeForceDrainSpec{
-			NodeSelector: &metav1.LabelSelector{
+			NodeSelector: metav1.LabelSelector{
 				MatchLabels: node1.Labels,
 			},
 			NodeDrainGracePeriod:      metav1.Duration{Duration: 1 * time.Hour},
@@ -339,7 +339,7 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSetsStaticP
 			Namespace: "default",
 		},
 		Spec: managedupgradev1beta1.NodeForceDrainSpec{
-			NodeSelector: &metav1.LabelSelector{
+			NodeSelector: metav1.LabelSelector{
 				MatchLabels: drainingNode.Labels,
 			},
 			NodeDrainGracePeriod: metav1.Duration{Duration: 1 * time.Hour},
@@ -383,6 +383,241 @@ func Test_NodeForceDrainReconciler_Reconcile_DrainIgnoreActiveDaemonsSetsStaticP
 	require.ElementsMatch(t, podNames, []string{"pod-with-active-daemonset-controller", "static-pod"}, "the pod with an active DaemonSet controller and the static pod should be left alone")
 }
 
+func Test_NodeForceDrainReconciler_Reconcile_DrainOnlyMatchingNamespace(t *testing.T) {
+	ctx := log.IntoContext(t.Context(), testr.New(t))
+
+	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.Local)}
+	t.Log("Now: ", clock.Now())
+
+	drainingNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Labels: map[string]string{
+				"node-role.kubernetes.io/app": "",
+			},
+			Annotations: map[string]string{
+				LastAppliedDrainerAnnotationKey: "node1-drainer-1",
+				DesiredDrainerAnnotationKey:     "node1-drainer-2",
+			},
+		},
+	}
+	matchingNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "matching-ns",
+			Labels: map[string]string{
+				"matching": "true",
+			},
+		},
+	}
+	otherNS := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "other-ns",
+			Labels: map[string]string{
+				"matching": "false",
+			},
+		},
+	}
+	podInOtherNamespace := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-in-other-ns",
+			Namespace: otherNS.Name,
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+		},
+	}
+	podInMatchingNamespace := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-in-matching-ns",
+			Namespace: matchingNS.Name,
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+		},
+	}
+	// Not sure if this can ever happen with a real API-server but we do not drain pods
+	// where we can't retrieve NS information to not accidentally drain too much
+	podCantRetrieveNs := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-cant-retrieve-ns",
+			Namespace: "zzz-not-exist",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+		},
+	}
+
+	forceDrain := &managedupgradev1beta1.NodeForceDrain{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "node-force-drain",
+			Namespace: "default",
+		},
+		Spec: managedupgradev1beta1.NodeForceDrainSpec{
+			NamespaceSelector: metav1.LabelSelector{
+				MatchLabels: matchingNS.Labels,
+			},
+			NodeDrainGracePeriod: metav1.Duration{Duration: 1 * time.Hour},
+		},
+		Status: managedupgradev1beta1.NodeForceDrainStatus{
+			LastObservedNodeDrain: []managedupgradev1beta1.ObservedNodeDrain{
+				{
+					NodeName:         drainingNode.Name,
+					LastAppliedDrain: "node1-drainer-1",
+					ObservedTime:     metav1.NewTime(clock.Now().Add(-5 * time.Hour)),
+				},
+			},
+		},
+	}
+
+	cli := controllerClient(t, forceDrain, drainingNode, matchingNS, otherNS, podInMatchingNamespace, podInOtherNamespace, podCantRetrieveNs)
+
+	subject := &NodeForceDrainReconciler{
+		Client:    cli,
+		APIReader: cli,
+		Scheme:    cli.Scheme(),
+		Recorder:  newFakeRecorder(),
+
+		Clock: &clock,
+	}
+
+	var pods corev1.PodList
+	require.NoError(t, cli.List(ctx, &pods))
+	require.Len(t, pods.Items, 3, "precondition: all testing pods should be present")
+
+	_, err := subject.Reconcile(ctx, requestForObject(forceDrain))
+	require.NoError(t, err)
+
+	var podsAfterDrain corev1.PodList
+	require.NoError(t, cli.List(ctx, &podsAfterDrain))
+	podNames := make([]string, 0, len(podsAfterDrain.Items))
+	for _, pod := range podsAfterDrain.Items {
+		podNames = append(podNames, pod.Name)
+	}
+	require.ElementsMatch(t, podNames, []string{podInOtherNamespace.Name, podCantRetrieveNs.Name}, "pod with non-matching namespace should be left alone")
+}
+
+func Test_NodeForceDrainReconciler_Reconcile_DrainOnlyMatchingPod(t *testing.T) {
+	ctx := log.IntoContext(t.Context(), testr.New(t))
+
+	clock := mockClock{now: time.Date(2022, time.April, 4, 8, 0, 0, 0, time.Local)}
+	t.Log("Now: ", clock.Now())
+
+	drainingNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Labels: map[string]string{
+				"node-role.kubernetes.io/app": "",
+			},
+			Annotations: map[string]string{
+				LastAppliedDrainerAnnotationKey: "node1-drainer-1",
+				DesiredDrainerAnnotationKey:     "node1-drainer-2",
+			},
+		},
+	}
+	otherPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "other-pod",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+			Containers: []corev1.Container{
+				{
+					Name:  "container-1",
+					Image: "plsnodeleting:latest",
+				},
+			},
+		},
+	}
+	podMatchingExpression := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-matching-expression",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+			Containers: []corev1.Container{
+				{
+					Name:  "container-1",
+					Image: "sidecar:latest",
+				}, {
+					Name:  "container-2",
+					Image: "oktodrain:latest",
+				}, {
+					Name:  "container-3",
+					Image: "other-sidecar:latest",
+				},
+			},
+		},
+	}
+	podQueryError := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-query-error",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+			Containers: []corev1.Container{
+				{
+					Name:  "container-1",
+					Image: "oktodrain:latest",
+				},
+			},
+		},
+	}
+	podNonBool := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-non-bool",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: drainingNode.Name,
+		},
+	}
+
+	forceDrain := &managedupgradev1beta1.NodeForceDrain{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "node-force-drain",
+			Namespace: "default",
+		},
+		Spec: managedupgradev1beta1.NodeForceDrainSpec{
+			PodJQSelector:        `if .metadata.name | test("error") then (.metadata.name | halt_error) elif .metadata.name | test("non-bool") then "blub" else .spec.containers[] | .image | test("oktodrain") end`,
+			NodeDrainGracePeriod: metav1.Duration{Duration: 1 * time.Hour},
+		},
+		Status: managedupgradev1beta1.NodeForceDrainStatus{
+			LastObservedNodeDrain: []managedupgradev1beta1.ObservedNodeDrain{
+				{
+					NodeName:         drainingNode.Name,
+					LastAppliedDrain: "node1-drainer-1",
+					ObservedTime:     metav1.NewTime(clock.Now().Add(-5 * time.Hour)),
+				},
+			},
+		},
+	}
+
+	cli := controllerClient(t, forceDrain, drainingNode, otherPod, podMatchingExpression, podQueryError, podNonBool)
+
+	subject := &NodeForceDrainReconciler{
+		Client:    cli,
+		APIReader: cli,
+		Scheme:    cli.Scheme(),
+		Recorder:  newFakeRecorder(),
+
+		Clock: &clock,
+	}
+
+	var pods corev1.PodList
+	require.NoError(t, cli.List(ctx, &pods))
+	require.Len(t, pods.Items, 4, "precondition: all testing pods should be present")
+
+	_, err := subject.Reconcile(ctx, requestForObject(forceDrain))
+	require.NoError(t, err)
+
+	var podsAfterDrain corev1.PodList
+	require.NoError(t, cli.List(ctx, &podsAfterDrain))
+	podNames := make([]string, 0, len(podsAfterDrain.Items))
+	for _, pod := range podsAfterDrain.Items {
+		podNames = append(podNames, pod.Name)
+	}
+	require.ElementsMatch(t, podNames, []string{otherPod.Name, podQueryError.Name, podNonBool.Name}, "pod with non-matching selectors and erroring selectors should be left alone")
+}
+
 func Test_NodeForceDrainReconciler_Reconcile_MaxIntervalDuringActiveDrain(t *testing.T) {
 	ctx := log.IntoContext(t.Context(), testr.New(t))
 
@@ -408,7 +643,7 @@ func Test_NodeForceDrainReconciler_Reconcile_MaxIntervalDuringActiveDrain(t *tes
 			Namespace: "default",
 		},
 		Spec: managedupgradev1beta1.NodeForceDrainSpec{
-			NodeSelector: &metav1.LabelSelector{
+			NodeSelector: metav1.LabelSelector{
 				MatchLabels: drainingNode.Labels,
 			},
 			NodeDrainGracePeriod: metav1.Duration{Duration: 1 * time.Hour},
@@ -467,7 +702,7 @@ func Test_NodeToNodeForceDrainMapper(t *testing.T) {
 				Name:      "fd-direct-match",
 			},
 			Spec: managedupgradev1beta1.NodeForceDrainSpec{
-				NodeSelector: &metav1.LabelSelector{
+				NodeSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"im-important": "true",
 					},
@@ -480,7 +715,7 @@ func Test_NodeToNodeForceDrainMapper(t *testing.T) {
 				Name:      "fd-direct-match-exp",
 			},
 			Spec: managedupgradev1beta1.NodeForceDrainSpec{
-				NodeSelector: &metav1.LabelSelector{
+				NodeSelector: metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
 							Key:      "im-important",
@@ -492,20 +727,11 @@ func Test_NodeToNodeForceDrainMapper(t *testing.T) {
 		},
 		&managedupgradev1beta1.NodeForceDrain{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "fd-selector-nil",
-				Namespace: "default",
-			},
-			Spec: managedupgradev1beta1.NodeForceDrainSpec{
-				NodeSelector: nil,
-			},
-		},
-		&managedupgradev1beta1.NodeForceDrain{
-			ObjectMeta: metav1.ObjectMeta{
 				Name:      "fd-selector-no-match",
 				Namespace: "default",
 			},
 			Spec: managedupgradev1beta1.NodeForceDrainSpec{
-				NodeSelector: &metav1.LabelSelector{
+				NodeSelector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						"other-selector": "true",
 					},

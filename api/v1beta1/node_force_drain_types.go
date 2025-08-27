@@ -7,8 +7,25 @@ import (
 // NodeForceDrainSpec defines the desired state of NodeForceDrain
 type NodeForceDrainSpec struct {
 	// NodeSelector is a selector to select which nodes to drain
-	// A nil selector matches no nodes, while an empty selector matches all nodes.
-	NodeSelector *metav1.LabelSelector `json:"nodeSelector"`
+	// An empty selector matches all nodes.
+	NodeSelector metav1.LabelSelector `json:"nodeSelector"`
+	// NamespaceSelector is a selector to select which namespaces to drain
+	// An empty selector matches all namespaces.
+	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+	// PodJQSelector is a selector to select which pods to drain.
+	// The selector is a JQ selector that should return a stream of one or more booleans.
+	// If any of the booleans are true, the pod will be drained.
+	// An empty stream will not drain the pod.
+	// Any non-boolean value will be ignored but will not halt the program.
+	// Under the hood https://github.com/itchyny/gojq is used which is mostly compatible
+	// with https://jqlang.org/manual/ but has some small limitations and might lag a bit behind upstream.
+	// If the program is halted - due to error or explicit `halt` - before any boolean is returned, the pod will not be drained.
+	// If the program is halted - due to error or explicit `halt` - after a truthy boolean is returned, the pod will be drained.
+	// Examples:
+	//   .metadata.namespace | test("-dev$")
+	//   .spec.containers[] | .image | test("oktodrain")
+	//   [.spec.containers[] | .image | test("oktodrain")] | all
+	PodJQSelector string `json:"podJQSelector,omitempty"`
 	// NodeDrainGracePeriod is the duration until the controller starts to delete pods on the node.
 	// The duration is calculated from the OpenShist node drain annotation.
 	// This circumvents the eviction API and means that PDBs are ignored.

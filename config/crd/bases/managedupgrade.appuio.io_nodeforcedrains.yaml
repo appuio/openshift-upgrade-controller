@@ -39,6 +39,54 @@ spec:
           spec:
             description: NodeForceDrainSpec defines the desired state of NodeForceDrain
             properties:
+              namespaceSelector:
+                description: |-
+                  NamespaceSelector is a selector to select which namespaces to drain
+                  An empty selector matches all namespaces.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
               nodeDrainGracePeriod:
                 description: |-
                   NodeDrainGracePeriod is the duration until the controller starts to delete pods on the node.
@@ -50,7 +98,7 @@ spec:
               nodeSelector:
                 description: |-
                   NodeSelector is a selector to select which nodes to drain
-                  A nil selector matches no nodes, while an empty selector matches all nodes.
+                  An empty selector matches all nodes.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -105,6 +153,22 @@ spec:
                   We do not use `--force --grace-period=0`, if doing so the pod would be dropped from the API without being killed on the node.
                   Such pods do block the reboot of the node and the node will stay in a `NotReady` state for extended periods.
                   A zero value disables the force delete.
+                type: string
+              podJQSelector:
+                description: |-
+                  PodJQSelector is a selector to select which pods to drain.
+                  The selector is a JQ selector that should return a stream of one or more booleans.
+                  If any of the booleans are true, the pod will be drained.
+                  An empty stream will not drain the pod.
+                  Any non-boolean value will be ignored but will not halt the program.
+                  Under the hood https://github.com/itchyny/gojq is used which is mostly compatible
+                  with https://jqlang.org/manual/ but has some small limitations and might lag a bit behind upstream.
+                  If the program is halted - due to error or explicit `halt` - before any boolean is returned, the pod will not be drained.
+                  If the program is halted - due to error or explicit `halt` - after a truthy boolean is returned, the pod will be drained.
+                  Examples:
+                    .metadata.namespace | test("-dev$")
+                    .spec.containers[] | .image | test("oktodrain")
+                    [.spec.containers[] | .image | test("oktodrain")] | all
                 type: string
             required:
             - nodeDrainGracePeriod

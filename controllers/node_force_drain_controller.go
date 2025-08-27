@@ -18,10 +18,12 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
 
+	"github.com/itchyny/gojq"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -64,6 +66,7 @@ type NodeForceDrainReconciler struct {
 }
 
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
 //+kubebuilder:rbac:groups="apps",resources=daemonsets,verbs=get;list;watch
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=nodeforcedrains,verbs=get;list;watch;update;patch
@@ -82,17 +85,27 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	if fd.Spec.NodeSelector == nil {
-		return ctrl.Result{}, nil
-	}
-
 	var nodes corev1.NodeList
-	nodeSel, err := metav1.LabelSelectorAsSelector(fd.Spec.NodeSelector)
+	nodeSel, err := metav1.LabelSelectorAsSelector(&fd.Spec.NodeSelector)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to parse NodeSelector: %w", err)
 	}
 	if err := r.List(ctx, &nodes, client.MatchingLabelsSelector{Selector: nodeSel}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	podNSSelector, err := metav1.LabelSelectorAsSelector(&fd.Spec.NamespaceSelector)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to parse NamespaceSelector: %w", err)
+	}
+
+	var podJQQuery *gojq.Query
+	if fd.Spec.PodJQSelector != "" {
+		q, err := gojq.Parse(fd.Spec.PodJQSelector)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to parse PodJQSelector: %w", err)
+		}
+		podJQQuery = q
 	}
 
 	// Check for draining nodes, using the node drainer annotations.
@@ -156,7 +169,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force draining node", "node", node.Name)
-			deleted, err := r.forceDrainNode(ctx, node)
+			deleted, err := r.forceDrainNode(ctx, node, podNSSelector, podJQQuery)
 			if deleted {
 				didDeletePod = true
 			}
@@ -174,7 +187,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force deleting pods on node", "node", node.Name)
-			if t, err := r.forceDeletePodsOnNode(ctx, node, pfd); err != nil {
+			if t, err := r.forceDeletePodsOnNode(ctx, node, pfd, podNSSelector, podJQQuery); err != nil {
 				errors = append(errors, fmt.Errorf("failed to force delete pods on node %s: %w", node.Name, err))
 			} else if t > 0 && (timeUntilNextPodForceDelete == 0 || t < timeUntilNextPodForceDelete) {
 				timeUntilNextPodForceDelete = t
@@ -239,10 +252,10 @@ func (r *NodeForceDrainReconciler) setLastObservedNodeDrain(fd *managedupgradev1
 
 // forceDrainNode deletes all pods on the node.
 // Returns true if there was an attempt to delete a pod and any errors that occurred.
-func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node corev1.Node) (bool, error) {
+func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node corev1.Node, podNSSelector labels.Selector, podJQQuery *gojq.Query) (bool, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.forceDrainNode").WithValues("node", node.Name)
 
-	pods, err := r.getDeletionCandidatePodsForNode(ctx, node)
+	pods, err := r.getDeletionCandidatePodsForNode(ctx, node, podNSSelector, podJQQuery)
 	if err != nil {
 		return false, fmt.Errorf("failed to get deletion candidate pods for node %s: %w", node.Name, err)
 	}
@@ -267,10 +280,10 @@ func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node core
 // forceDeletePodsOnNode deletes all pods on the node.
 // Returns the time until the next force delete and any errors that occurred.
 // A time of 0 means that there are no pods to force delete.
-func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, node corev1.Node, gracePeriod time.Duration) (time.Duration, error) {
+func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, node corev1.Node, gracePeriod time.Duration, podNSSelector labels.Selector, podJQQuery *gojq.Query) (time.Duration, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.forceDeletePodsOnNode").WithValues("node", node.Name)
 
-	pods, err := r.getDeletionCandidatePodsForNode(ctx, node)
+	pods, err := r.getDeletionCandidatePodsForNode(ctx, node, podNSSelector, podJQQuery)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get deletion candidate pods for node %s: %w", node.Name, err)
 	}
@@ -312,7 +325,7 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 
 // getDeletionCandidatePodsForNode returns a list of pods on the node that are not controlled by an active DaemonSet.
 // Pods controlled by an active DaemonSet are not returned.
-func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.Context, node corev1.Node) ([]corev1.Pod, error) {
+func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.Context, node corev1.Node, podNSSelector labels.Selector, podJQQuery *gojq.Query) ([]corev1.Pod, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.getDeletionCandidatePodsForNode").WithValues("node", node.Name)
 
 	// We use the API directly to avoid caching all pods in the controller.
@@ -331,6 +344,46 @@ func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.C
 	filteredPods := make([]corev1.Pod, 0, len(pods.Items))
 	for _, pod := range pods.Items {
 		l := l.WithValues("pod", pod.Name, "podNamespace", pod.Namespace)
+		ctx := log.IntoContext(ctx, l)
+
+		inMatchingNs, err := r.podIsInMatchingNamespace(ctx, pod, podNSSelector)
+		if err != nil {
+			ignoredPods = append(ignoredPods, ignoredPod{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+				Reason:    "error checking namespace",
+			})
+			continue
+		}
+		if !inMatchingNs {
+			ignoredPods = append(ignoredPods, ignoredPod{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+				Reason:    "namespace does not match",
+			})
+			continue
+		}
+
+		if podJQQuery != nil {
+			matches, err := r.podJQQueryMatches(ctx, pod, podJQQuery)
+			if err != nil {
+				ignoredPods = append(ignoredPods, ignoredPod{
+					Name:      pod.Name,
+					Namespace: pod.Namespace,
+					Reason:    "error evaluating JQ query",
+				})
+				continue
+			}
+			if !matches {
+				ignoredPods = append(ignoredPods, ignoredPod{
+					Name:      pod.Name,
+					Namespace: pod.Namespace,
+					Reason:    "pod does not match JQ query",
+				})
+				continue
+			}
+		}
+
 		controlledByActiveDaemonSet, err := r.podIsControlledByExistingDaemonSet(ctx, pod)
 		if err != nil {
 			l.Error(err, "Failed to check if pod is controlled by active DaemonSet")
@@ -366,6 +419,56 @@ func (r *NodeForceDrainReconciler) getDeletionCandidatePodsForNode(ctx context.C
 	}
 
 	return filteredPods, nil
+}
+
+func (r *NodeForceDrainReconciler) podIsInMatchingNamespace(ctx context.Context, pod corev1.Pod, podNSSelector labels.Selector) (bool, error) {
+	if podNSSelector.Empty() {
+		return true, nil
+	}
+
+	var ns corev1.Namespace
+	if err := r.Get(ctx, client.ObjectKey{Name: pod.Namespace}, &ns); err != nil {
+		return false, fmt.Errorf("failed to get namespace for pod %s: %w", pod.Name, err)
+	}
+
+	return podNSSelector.Matches(labels.Set(ns.Labels)), nil
+}
+
+func (r *NodeForceDrainReconciler) podJQQueryMatches(ctx context.Context, pod corev1.Pod, podJQQuery *gojq.Query) (bool, error) {
+	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.podJQQueryMatches")
+
+	podBytes, err := json.Marshal(pod)
+	if err != nil {
+		return false, fmt.Errorf("failed to convert pod to raw JSON (marshal): %w", err)
+	}
+	var rawPod any
+	if err := json.Unmarshal(podBytes, &rawPod); err != nil {
+		return false, fmt.Errorf("failed to convert pod to raw JSON (unmarshal): %w", err)
+	}
+
+	matches := false
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	iter := podJQQuery.RunWithContext(runCtx, rawPod)
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if err, ok := v.(error); ok {
+			if err, ok := err.(*gojq.HaltError); ok && err.Value() == nil {
+				break
+			}
+			l.Error(err, "JQ query returned error, halting")
+			break
+		}
+		if vb, ok := v.(bool); ok {
+			matches = matches || vb
+		} else {
+			l.Error(fmt.Errorf("JQ query did not return a boolean, returned %T (%+v)", v, v), "Ignore query result")
+		}
+	}
+	return matches, nil
 }
 
 // podIsStatic returns true if the pod is a static pod.
@@ -434,10 +537,7 @@ func NodeToNodeForceDrainMapper(c client.Reader) handler.TypedMapFunc[*corev1.No
 		for _, fd := range fds.Items {
 			l := l.WithValues("force_node_drain_name", fd.Name, "force_node_drain_namespace", fd.Namespace)
 
-			if fd.Spec.NodeSelector == nil {
-				continue
-			}
-			sel, err := metav1.LabelSelectorAsSelector(fd.Spec.NodeSelector)
+			sel, err := metav1.LabelSelectorAsSelector(&fd.Spec.NodeSelector)
 			if err != nil {
 				l.Error(err, "failed to parse NodeSelector")
 				continue
