@@ -499,7 +499,7 @@ func (r *NodeForceDrainReconciler) podIsControlledByExistingDaemonSet(ctx contex
 	// We don't need a full object, metadata is enough.
 	var ds metav1.PartialObjectMetadata
 	ds.SetGroupVersionKind(appsv1.SchemeGroupVersion.WithKind("DaemonSet"))
-	err := r.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: controllerRef.Name}, &ds)
+	err := r.APIReader.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: controllerRef.Name}, &ds)
 	if err != nil {
 		// Edge case: Pod was orphaned
 		// See https://github.com/kubernetes/kubectl/blob/442e3d141a35703b7637f41339b9f73cad005c47/pkg/drain/filters.go#L174
