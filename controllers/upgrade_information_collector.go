@@ -22,7 +22,7 @@ import (
 )
 
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch
 
 var clusterUpgradingDesc = prometheus.NewDesc(
 	MetricsNamespace+"_cluster_upgrading",

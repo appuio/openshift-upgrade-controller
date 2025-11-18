@@ -61,7 +61,7 @@ const (
 )
 
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch
+//+kubebuilder:rbac:groups=machineconfiguration.openshift.io,resources=machineconfigpools,verbs=get;list;watch;update;patch
 
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=managedupgrade.appuio.io,resources=upgradejobs/status,verbs=get;update;patch
@@ -113,7 +113,12 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Don't execute hooks created after the job was finished.
 		_, efaerr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFailure, noTrackingKey, eventInfoWithReason(fc.Reason), fc.LastTransitionTime.Time)
 		_, efierr := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventFinish, noTrackingKey, eventInfoWithReason(fc.Reason), fc.LastTransitionTime.Time)
-		return ctrl.Result{}, multierr.Combine(efaerr, efierr, r.cleanupLock(ctx, uj))
+		return ctrl.Result{}, multierr.Combine(
+			efaerr,
+			efierr,
+			r.pauseMachinePoolsOnFailure(ctx, uj),
+			r.cleanupLock(ctx, uj),
+		)
 	}
 
 	cont, err := r.executeHooks(ctx, &uj, managedupgradev1beta1.EventCreate, noTrackingKey, eventInfoWithReason(""), time.Time{})
@@ -1100,6 +1105,53 @@ func (r *UpgradeJobReconciler) cleanupMachineConfigPools(ctx context.Context, uj
 		}
 		if err := r.Update(ctx, &mcp); err != nil {
 			errs = append(errs, fmt.Errorf("failed to cleanup machine config pool %q: %w", mcp.Name, err))
+		}
+	}
+
+	return multierr.Combine(errs...)
+}
+
+func (r *UpgradeJobReconciler) pauseMachinePoolsOnFailure(ctx context.Context, uj managedupgradev1beta1.UpgradeJob) error {
+	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.pauseMachinePoolsOnFailure")
+
+	if !uj.Spec.PauseMachineConfigPoolsOnFailure.Enabled {
+		return nil
+	}
+	if cond := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionMachineConfigPoolsPaused); cond != nil &&
+		cond.Reason == managedupgradev1beta1.UpgradeJobReasonPausedOnFailure && cond.Status == metav1.ConditionTrue {
+		l.Info("machine config pools already paused on failure")
+		return nil
+	}
+
+	selector, err := metav1.LabelSelectorAsSelector(&uj.Spec.PauseMachineConfigPoolsOnFailure.Selector)
+	if err != nil {
+		return fmt.Errorf("failed to parse machine config pool selector: %w", err)
+	}
+	var mcpl machineconfigurationv1.MachineConfigPoolList
+	if err := r.List(ctx, &mcpl, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+		return fmt.Errorf("failed to list machine config pools: %w", err)
+	}
+	var errs []error
+	for _, mcp := range mcpl.Items {
+		if mcp.Spec.Paused {
+			continue
+		}
+		if mcp.Status.MachineCount == mcp.Status.UpdatedMachineCount {
+			continue
+		}
+		l.Info("pausing machine config pool due to upgrade job failure", "pool", mcp.Name)
+		mcp.Spec.Paused = true
+		if err := r.Update(ctx, &mcp); err != nil {
+			errs = append(errs, fmt.Errorf("failed to pause machine config pool %q: %w", mcp.Name, err))
+		}
+	}
+	if changed := r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+		Type:   managedupgradev1beta1.UpgradeJobConditionMachineConfigPoolsPaused,
+		Status: metav1.ConditionTrue,
+		Reason: managedupgradev1beta1.UpgradeJobReasonPausedOnFailure,
+	}); changed {
+		if err := r.Status().Update(ctx, &uj); err != nil {
+			errs = append(errs, fmt.Errorf("failed to update upgrade job status: %w", err))
 		}
 	}
 
