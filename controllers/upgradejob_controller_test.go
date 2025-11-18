@@ -852,14 +852,16 @@ func Test_UpgradeJobReconciler_Reconcile_ClaimNextHook(t *testing.T) {
 	require.Equal(t, 1, len(jobs.Items), "hook job should be created")
 
 	expectedClaim := managedupgradev1beta1.ClaimReference{
-		APIVersion: "managedupgrade.appuio.io/v1beta1",
-		Kind:       "UpgradeJob",
-		Name:       upgradeJob.Name,
-		UID:        upgradeJob.UID,
+		Name: upgradeJob.Name,
+		UID:  upgradeJob.UID,
 	}
 
 	require.NoError(t, c.Get(ctx, requestForObject(upgradeJobHook).NamespacedName, upgradeJobHook))
-	require.Equal(t, expectedClaim, upgradeJobHook.Status.ClaimedBy, "hook should be claimed by upgrade job")
+	// We don't verify Kind and APIVersion here, as they are now consistently stripped in fake-client setups.
+	// TODO do we want to switch to envtest for these tests to have a more realistic client behavior?
+	// envtest now works much better than when we started these tests (still much slower tho).
+	require.Equal(t, upgradeJob.Name, upgradeJobHook.Status.ClaimedBy.Name, "hook should be claimed by upgrade job")
+	require.Equal(t, upgradeJob.UID, upgradeJobHook.Status.ClaimedBy.UID, "hook should be claimed by upgrade job")
 
 	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
 
