@@ -57,6 +57,8 @@ const (
 	UpgradeJobReasonDelaySet = "DelaySet"
 	// UpgradeJobReasonDelayReached is used to indicate that the pause delay for the upgrade of the machine config pool has expired.
 	UpgradeJobReasonDelayReached = "DelayReached"
+	// UpgradeJobReasonPausedOnFailure is used when the upgrade job paused machine config pools due to job failure.
+	UpgradeJobReasonPausedOnFailure = "PausedOnFailure"
 )
 
 // UpgradeJobSpec defines the desired state of UpgradeJob
@@ -109,6 +111,25 @@ type UpgradeJobConfig struct {
 	// MachineConfigPools defines the machine config pool specific configuration for the upgrade job
 	// +optional
 	MachineConfigPools []UpgradeJobMachineConfigPoolSpec `json:"machineConfigPools,omitempty"`
+
+	// PauseMachineConfigPoolsOnFailure allows pausing machine config pools on upgrade job failure.
+	// Allows further investigation and manual remediation by the cluster administrator.
+	// +optional
+	PauseMachineConfigPoolsOnFailure PauseMachineConfigPoolsOnFailureSpec `json:"pauseMachineConfigPoolsOnFailure"`
+}
+
+// PauseMachineConfigPoolsOnFailureSpec defines the configuration for pausing machine config pools on upgrade job failure.
+type PauseMachineConfigPoolsOnFailureSpec struct {
+	// Enabled defines whether to pause machine config pools on upgrade job failure.
+	// If true, the controller will pause machine config pools matching the selector if an upgrade job fails.
+	// Machine config pools should then be unpaused manually by the cluster administrator after the underlying issue has been resolved.
+	// Machine config pools that are already done updating or that are already paused are not affected.
+	// +optional
+	Enabled bool `json:"enabled"`
+	// Selector defines the labels to match the machine config pools to pause on failure.
+	// If empty, all machine config pools are matched.
+	// +optional
+	Selector metav1.LabelSelector `json:"selector"`
 }
 
 // UpgradeJobMachineConfigPoolSpec allows configuring the upgrade of a machine config pool

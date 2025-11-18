@@ -1095,6 +1095,134 @@ func Test_UpgradeJobReconciler_Reconcile_Timeout(t *testing.T) {
 	require.Empty(t, ucv.Annotations[JobLockAnnotation], "should clear lock annotation")
 }
 
+func Test_UpgradeJobReconciler_Reconcile_PauseMachineConfigPoolsOnFailure(t *testing.T) {
+	ctx := log.IntoContext(t.Context(), testr.New(t))
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	ucv := &configv1.ClusterVersion{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "version",
+		},
+		Status: configv1.ClusterVersionStatus{
+			AvailableUpdates: []configv1.Release{{
+				Version: "4.5.13",
+			}},
+		},
+	}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(3 * time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-time.Hour)),
+			DesiredVersion: &configv1.Update{
+				Version: "4.5.13",
+			},
+			UpgradeJobConfig: managedupgradev1beta1.UpgradeJobConfig{
+				UpgradeTimeout: metav1.Duration{Duration: time.Hour},
+				PauseMachineConfigPoolsOnFailure: managedupgradev1beta1.PauseMachineConfigPoolsOnFailureSpec{
+					Enabled: true,
+					Selector: metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"role": "worker",
+						},
+					},
+				},
+			},
+		},
+	}
+	mcpWorkerDone := &machineconfigurationv1.MachineConfigPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "worker-done",
+			Labels: map[string]string{
+				"role": "worker",
+			},
+		},
+		Status: machineconfigurationv1.MachineConfigPoolStatus{
+			MachineCount:        3,
+			UpdatedMachineCount: 3,
+		},
+	}
+	mcpWorkerNotDone := &machineconfigurationv1.MachineConfigPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "worker-not-done",
+			Labels: map[string]string{
+				"role": "worker",
+			},
+		},
+		Status: machineconfigurationv1.MachineConfigPoolStatus{
+			MachineCount:        3,
+			UpdatedMachineCount: 2,
+		},
+	}
+	mcpNotMatchingSelector := &machineconfigurationv1.MachineConfigPool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "master-not-done",
+			Labels: map[string]string{
+				"role": "master",
+			},
+		},
+		Status: machineconfigurationv1.MachineConfigPoolStatus{
+			MachineCount:        3,
+			UpdatedMachineCount: 2,
+		},
+	}
+
+	client := controllerClient(t, ucv, mcpWorkerDone, mcpWorkerNotDone, mcpNotMatchingSelector, upgradeJob)
+
+	subject := &UpgradeJobReconciler{
+		Client: client,
+		Scheme: client.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+	clock.Advance(2 * time.Hour)
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+
+	require.NoError(t, client.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	failedCond := apimeta.FindStatusCondition(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed)
+	require.NotNil(t, failedCond, "should set failed condition")
+	require.Equal(t, managedupgradev1beta1.UpgradeJobReasonTimedOut, failedCond.Reason)
+	require.NoError(t, client.Get(ctx, requestForObject(ucv).NamespacedName, ucv))
+	require.Empty(t, ucv.Annotations[JobLockAnnotation], "should clear lock annotation")
+
+	var mcps machineconfigurationv1.MachineConfigPoolList
+	require.NoError(t, client.List(ctx, &mcps))
+	type mcpPaused struct {
+		name   string
+		paused bool
+	}
+	var pausedStates []mcpPaused
+	for _, mcp := range mcps.Items {
+		pausedStates = append(pausedStates, mcpPaused{
+			name:   mcp.Name,
+			paused: mcp.Spec.Paused,
+		})
+	}
+	require.ElementsMatch(t, []mcpPaused{
+		{name: "worker-done", paused: false},
+		{name: "worker-not-done", paused: true},
+		{name: "master-not-done", paused: false},
+	}, pausedStates, "should pause MCPs still updating and matching selector")
+
+	t.Log("once MCPs are unpaused after upgrade job failure they should not be re-paused or managed further")
+	require.NoError(t, client.Get(ctx, requestForObject(mcpWorkerNotDone).NamespacedName, mcpWorkerNotDone))
+	mcpWorkerNotDone.Spec.Paused = false
+	require.NoError(t, client.Update(ctx, mcpWorkerNotDone))
+
+	reconcileNTimes(t, subject, ctx, requestForObject(upgradeJob), 3)
+
+	require.NoError(t, client.Get(ctx, requestForObject(mcpWorkerNotDone).NamespacedName, mcpWorkerNotDone))
+	require.False(t, mcpWorkerNotDone.Spec.Paused, "should not have re-paused MCP")
+}
+
 func Test_UpgradeJobReconciler_Reconcile_PreHealthCheckTimeout(t *testing.T) {
 	ctx := log.IntoContext(t.Context(), testr.New(t))
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
