@@ -1,6 +1,6 @@
 module github.com/appuio/openshift-upgrade-controller
 
-go 1.25
+go 1.25.0
 
 require github.com/openshift/api v0.0.0-20251107202431-28db677d7462 // release-4.18
 
@@ -15,9 +15,9 @@ require (
 	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6
 	golang.org/x/mod v0.30.0
-	k8s.io/api v0.34.2
-	k8s.io/apimachinery v0.34.2
-	k8s.io/client-go v0.34.2
+	k8s.io/api v0.35.2
+	k8s.io/apimachinery v0.35.2
+	k8s.io/client-go v0.35.2
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	sigs.k8s.io/controller-runtime v0.22.4
 )
