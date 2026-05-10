@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
+	"github.com/appuio/openshift-upgrade-controller/controllers/state"
 	"github.com/appuio/openshift-upgrade-controller/pkg/clusterversion"
 	"github.com/appuio/openshift-upgrade-controller/pkg/healthcheck"
 )
@@ -58,6 +59,72 @@ const (
 	hookJobTrackingLabelTrackingKey    = "upgradejobs.managedupgrade.appuio.io/tracking-key"
 
 	noTrackingKey = ""
+)
+
+const (
+	StateCreated         = "Created"
+	StateStarted         = "Started"
+	StatePreHealthCheck  = "PreHealthCheck"
+	StateUpgrading       = "Upgrading"
+	StatePostHealthCheck = "PostHealthCheck"
+	StateSucceeded       = "Succeeded"
+	StateFailed          = "Failed"
+)
+
+var (
+	stateMachine = must(stateBuilder.Build())
+	stateBuilder = new(state.Builder[managedupgradev1beta1.UpgradeJob, ctrl.Result]).
+			AddState(StateCreated,
+			func(ctx context.Context, uj managedupgradev1beta1.UpgradeJob) (string, ctrl.Result, error) {
+				return "", ctrl.Result{}, nil
+			}).
+		AddTransition(StateCreated, StateStarted, func(cond *[]metav1.Condition) error {
+			apimeta.SetStatusCondition(cond, metav1.Condition{
+				Type:    managedupgradev1beta1.UpgradeJobConditionStarted,
+				Status:  metav1.ConditionTrue,
+				Reason:  managedupgradev1beta1.UpgradeJobReasonStarted,
+				Message: fmt.Sprintf("Upgrade started at %s", time.Now().Format(time.RFC3339)),
+			})
+			return nil
+		}).
+		AddState(StateStarted,
+			func(ctx context.Context, uj managedupgradev1beta1.UpgradeJob) (string, ctrl.Result, error) {
+				return "", ctrl.Result{}, nil
+			},
+			state.MatchCondition{Type: managedupgradev1beta1.UpgradeJobConditionStarted, Status: metav1.ConditionTrue},
+		).
+		AddState(StatePreHealthCheck,
+			func(ctx context.Context, uj managedupgradev1beta1.UpgradeJob) (string, ctrl.Result, error) {
+				return "", ctrl.Result{}, nil
+			},
+			state.MatchCondition{Type: managedupgradev1beta1.UpgradeJobConditionPreHealthCheckDone, Status: metav1.ConditionTrue},
+		).
+		AddState(StateUpgrading,
+			func(ctx context.Context, uj managedupgradev1beta1.UpgradeJob) (string, ctrl.Result, error) {
+				return "", ctrl.Result{}, nil
+			},
+			state.MatchCondition{Type: managedupgradev1beta1.UpgradeJobConditionPreHealthCheckDone, Status: metav1.ConditionTrue},
+		).
+		AddState(StatePostHealthCheck,
+			func(ctx context.Context, uj managedupgradev1beta1.UpgradeJob) (string, ctrl.Result, error) {
+				return "", ctrl.Result{}, nil
+			},
+			state.MatchCondition{Type: managedupgradev1beta1.UpgradeJobConditionUpgradeCompleted, Status: metav1.ConditionTrue},
+		).
+		AddState(StateSucceeded,
+			func(ctx context.Context, uj managedupgradev1beta1.UpgradeJob) (string, ctrl.Result, error) {
+				return "", ctrl.Result{}, nil
+			},
+			state.MatchCondition{Type: managedupgradev1beta1.UpgradeJobConditionSucceeded, Status: metav1.ConditionTrue},
+			state.MatchCondition{Type: managedupgradev1beta1.UpgradeJobConditionFailed, Status: metav1.ConditionFalse},
+		).
+		AddState(StateFailed,
+			func(ctx context.Context, uj managedupgradev1beta1.UpgradeJob) (string, ctrl.Result, error) {
+				return "", ctrl.Result{}, nil
+			},
+			state.MatchCondition{Type: managedupgradev1beta1.UpgradeJobConditionSucceeded, Status: metav1.ConditionFalse},
+			state.MatchCondition{Type: managedupgradev1beta1.UpgradeJobConditionFailed, Status: metav1.ConditionTrue},
+		)
 )
 
 //+kubebuilder:rbac:groups=config.openshift.io,resources=clusterversions,verbs=get;list;watch;update;patch
@@ -91,6 +158,12 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	if !uj.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
+	}
+
+	{
+		c := slices.Clone(uj.Status.Conditions)
+		res, err := stateMachine.Run(ctx, &c, uj)
+		l.Info("State machine result", "state", res, "error", err)
 	}
 
 	sc := apimeta.FindStatusCondition(uj.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionSucceeded)
@@ -1169,4 +1242,11 @@ func eventInfoUnpause(reason, mcpName string) map[string]any {
 		"pool":   mcpName,
 		"reason": reason,
 	}
+}
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
