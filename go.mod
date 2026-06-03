@@ -6,7 +6,7 @@ require github.com/openshift/api v0.0.0-20260105154426-319dc2e49203 // release-4
 
 require (
 	dario.cat/mergo v1.0.2
-	github.com/Masterminds/semver/v3 v3.4.0
+	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/go-logr/logr v1.4.3
 	github.com/itchyny/gojq v0.12.19
 	github.com/prometheus/client_golang v1.23.2
