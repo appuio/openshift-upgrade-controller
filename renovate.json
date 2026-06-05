@@ -2,7 +2,9 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended",
-    ":gitSignOff"
+    ":gitSignOff",
+    "helpers:pinGitHubActionDigests",
+    "docker:pinDigests"
   ],
   "labels": [
     "dependency"
@@ -24,7 +26,22 @@
     },
     {
       "matchManagers": ["github-actions"],
-      "groupName": "github actions dependencies"
+      "groupName": "github actions dependencies",
+      "minimumReleaseAge": "7 days",
+      "prCreation": "not-pending",
+      "internalChecksFilter": "strict"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/\\.github/workflows/.+\\.yml$/"
+      ],
+      "matchStrings": [
+        "goreleaser-version:\\s+[\"']?(?<currentValue>v?[0-9.]+)[\"']?"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "goreleaser/goreleaser",
+      "versioningTemplate": "semver"
     }
   ]
 }
