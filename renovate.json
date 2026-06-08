@@ -12,6 +12,20 @@
   "postUpdateOptions": [
     "gomodTidy"
   ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/\\.github/workflows/.+\\.yml$/"
+      ],
+      "matchStrings": [
+        "goreleaser-version:\\s+[\"']?(?<currentValue>v?[0-9.]+)[\"']?"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "goreleaser/goreleaser",
+      "versioningTemplate": "semver"
+    }
+  ],
   "packageRules": [
     {
       "schedule": [
@@ -30,18 +44,6 @@
       "minimumReleaseAge": "7 days",
       "prCreation": "not-pending",
       "internalChecksFilter": "strict"
-    },
-    {
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/\\.github/workflows/.+\\.yml$/"
-      ],
-      "matchStrings": [
-        "goreleaser-version:\\s+[\"']?(?<currentValue>v?[0-9.]+)[\"']?"
-      ],
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "goreleaser/goreleaser",
-      "versioningTemplate": "semver"
     }
   ]
 }
