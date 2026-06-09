@@ -1,17 +1,21 @@
 package controllers
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr/testr"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
@@ -39,6 +43,7 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pod-on-node1",
 			Namespace: "default",
+			UID:       types.UID("pod-on-node1-uid"),
 		},
 		Spec: corev1.PodSpec{
 			NodeName: node1.Name,
@@ -48,6 +53,7 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "pod-on-node1-force-delete",
 			Namespace:  "default",
+			UID:        types.UID("pod-on-node1-force-delete-uid"),
 			Finalizers: []string{StuckPodSimulationFinalizer},
 		},
 		Spec: corev1.PodSpec{
@@ -228,6 +234,20 @@ func Test_NodeForceDrainReconciler_Reconcile_E2E(t *testing.T) {
 	step(t, "control that the storage node pod was never deleted", func(t *testing.T) {
 		var storageNodePod corev1.Pod
 		require.NoError(t, cli.Get(ctx, client.ObjectKeyFromObject(stuckPodOnDrainingStorageNode), &storageNodePod), "pod should still be there")
+	})
+
+	step(t, "check metrics", func(t *testing.T) {
+		if err := testutil.GatherAndCompare(metrics.Registry, strings.NewReader(`
+			# HELP openshift_upgrade_controller_node_force_drain_pod_deletions_total Counts the number of deletion attempts for pods on nodes that are being force drained. A pod can be deleted multiple times if it is stuck and can't get deleted on the first attempt.
+			# TYPE openshift_upgrade_controller_node_force_drain_pod_deletions_total counter
+			openshift_upgrade_controller_node_force_drain_pod_deletions_total{namespace="default",node="node1",node_force_drain="node-force-drain",pod_name="pod-on-node1",pod_uid="pod-on-node1-uid"} 1
+			openshift_upgrade_controller_node_force_drain_pod_deletions_total{namespace="default",node="node1",node_force_drain="node-force-drain",pod_name="pod-on-node1-force-delete",pod_uid="pod-on-node1-force-delete-uid"} 1
+			# HELP openshift_upgrade_controller_node_force_drain_pod_terminations_total Counts the number of termination attempts for pods on nodes that are being force drained. This metric counts pods with long grace periods. The controller deletes them with a grace period of 1. A pod can be terminated multiple times if it is stuck and can't get terminated on the first attempt.
+			# TYPE openshift_upgrade_controller_node_force_drain_pod_terminations_total counter
+			openshift_upgrade_controller_node_force_drain_pod_terminations_total{namespace="default",node="node1",node_force_drain="node-force-drain",pod_name="pod-on-node1-force-delete",pod_uid="pod-on-node1-force-delete-uid"} 1
+		`), "openshift_upgrade_controller_node_force_drain_pod_deletions_total", "openshift_upgrade_controller_node_force_drain_pod_terminations_total"); err != nil {
+			t.Fatal(err)
+		}
 	})
 }
 
