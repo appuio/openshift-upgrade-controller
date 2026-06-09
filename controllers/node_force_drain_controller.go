@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/itchyny/gojq"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -37,11 +38,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	managedupgradev1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 )
+
+var forceDrainPodDeletions = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: MetricsNamespace,
+	Subsystem: "node_force_drain",
+	Name:      "pod_deletions_total",
+	Help:      "Counts the number of deletion attempts for pods on nodes that are being force drained. A pod can be deleted multiple times if it is stuck and can't get deleted on the first attempt.",
+}, []string{"node_force_drain", "node", "namespace", "pod_name", "pod_uid"})
+
+var forceDrainPodTermination = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: MetricsNamespace,
+	Subsystem: "node_force_drain",
+	Name:      "pod_terminations_total",
+	Help:      "Counts the number of termination attempts for pods on nodes that are being force drained. This metric counts pods with long grace periods. The controller deletes them with a grace period of 1. A pod can be terminated multiple times if it is stuck and can't get terminated on the first attempt.",
+}, []string{"node_force_drain", "node", "namespace", "pod_name", "pod_uid"})
+
+func init() {
+	metrics.Registry.MustRegister(forceDrainPodDeletions, forceDrainPodTermination)
+}
 
 // NodeForceDrainReconciler reconciles the NodeForceDrain object
 // It should be called on node change events.
@@ -169,7 +189,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force draining node", "node", node.Name)
-			deleted, err := r.forceDrainNode(ctx, node, podNSSelector, podJQQuery)
+			deleted, err := r.forceDrainNode(ctx, fd.Name, node, podNSSelector, podJQQuery)
 			if deleted {
 				didDeletePod = true
 			}
@@ -187,7 +207,7 @@ func (r *NodeForceDrainReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		errors := make([]error, 0, len(nodesOutOfGracePeriod))
 		for _, node := range nodesOutOfGracePeriod {
 			l.Info("Force deleting pods on node", "node", node.Name)
-			if t, err := r.forceDeletePodsOnNode(ctx, node, pfd, podNSSelector, podJQQuery); err != nil {
+			if t, err := r.forceDeletePodsOnNode(ctx, fd.Name, node, pfd, podNSSelector, podJQQuery); err != nil {
 				errors = append(errors, fmt.Errorf("failed to force delete pods on node %s: %w", node.Name, err))
 			} else if t > 0 && (timeUntilNextPodForceDelete == 0 || t < timeUntilNextPodForceDelete) {
 				timeUntilNextPodForceDelete = t
@@ -252,7 +272,7 @@ func (r *NodeForceDrainReconciler) setLastObservedNodeDrain(fd *managedupgradev1
 
 // forceDrainNode deletes all pods on the node.
 // Returns true if there was an attempt to delete a pod and any errors that occurred.
-func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node corev1.Node, podNSSelector labels.Selector, podJQQuery *gojq.Query) (bool, error) {
+func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, forceDrainName string, node corev1.Node, podNSSelector labels.Selector, podJQQuery *gojq.Query) (bool, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.forceDrainNode").WithValues("node", node.Name)
 
 	pods, err := r.getDeletionCandidatePodsForNode(ctx, node, podNSSelector, podJQQuery)
@@ -269,6 +289,7 @@ func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node core
 		l.Info("Deleting pod", "pod", pod.Name, "podNamespace", pod.Namespace)
 		attemptedDeletion = true
 		r.Recorder.Eventf(&node, corev1.EventTypeWarning, "NodeDrainDeletePod", "Deleting pod %q in namespace %q", pod.Name, pod.Namespace)
+		forceDrainPodDeletions.WithLabelValues(forceDrainName, node.Name, pod.Namespace, pod.Name, string(pod.UID)).Inc()
 		if err := r.Delete(ctx, &pod); err != nil {
 			deletionErrs = append(deletionErrs, err)
 		}
@@ -280,7 +301,7 @@ func (r *NodeForceDrainReconciler) forceDrainNode(ctx context.Context, node core
 // forceDeletePodsOnNode deletes all pods on the node.
 // Returns the time until the next force delete and any errors that occurred.
 // A time of 0 means that there are no pods to force delete.
-func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, node corev1.Node, gracePeriod time.Duration, podNSSelector labels.Selector, podJQQuery *gojq.Query) (time.Duration, error) {
+func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, forceDrainName string, node corev1.Node, gracePeriod time.Duration, podNSSelector labels.Selector, podJQQuery *gojq.Query) (time.Duration, error) {
 	l := log.FromContext(ctx).WithName("NodeForceDrainReconciler.forceDeletePodsOnNode").WithValues("node", node.Name)
 
 	pods, err := r.getDeletionCandidatePodsForNode(ctx, node, podNSSelector, podJQQuery)
@@ -308,6 +329,7 @@ func (r *NodeForceDrainReconciler) forceDeletePodsOnNode(ctx context.Context, no
 
 		l.Info("Forcing pod termination")
 		r.Recorder.Eventf(&node, corev1.EventTypeWarning, "NodeDrainForcingPodTermination", "Forcing pod termination: Deleting pod %q in namespace %q with grace period of 1.", pod.Name, pod.Namespace)
+		forceDrainPodTermination.WithLabelValues(forceDrainName, node.Name, pod.Namespace, pod.Name, string(pod.UID)).Inc()
 		if err := r.Delete(ctx, &pod, &client.DeleteOptions{
 			// As far is I was able to find a grace period of 0 will leave the hanging pod on the node and block the reboot of the node.
 			// Therefore we set a grace period of 1 second for the quickest possible deletion.
