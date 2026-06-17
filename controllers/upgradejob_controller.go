@@ -179,14 +179,6 @@ func (r *UpgradeJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *managedupgradev1beta1.UpgradeJob) (ctrl.Result, error) {
 	l := log.FromContext(ctx).WithName("UpgradeJobReconciler.reconcileStartedJob")
 
-	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart, noTrackingKey, eventInfoWithReason(managedupgradev1beta1.UpgradeJobReasonStarted), time.Time{})
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if !cont {
-		return ctrl.Result{}, nil
-	}
-
 	if r.timeSinceStartAfter(uj) > uj.Spec.UpgradeTimeout.Duration {
 		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
 			Type:    managedupgradev1beta1.UpgradeJobConditionFailed,
@@ -195,6 +187,14 @@ func (r *UpgradeJobReconciler) reconcileStartedJob(ctx context.Context, uj *mana
 			Message: fmt.Sprintf("Upgrade timed out after %s", uj.Spec.UpgradeTimeout.Duration.String()),
 		})
 		return ctrl.Result{}, r.Status().Update(ctx, uj)
+	}
+
+	cont, err := r.executeHooks(ctx, uj, managedupgradev1beta1.EventStart, noTrackingKey, eventInfoWithReason(managedupgradev1beta1.UpgradeJobReasonStarted), time.Time{})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !cont {
+		return ctrl.Result{}, nil
 	}
 
 	var version configv1.ClusterVersion
