@@ -15,4 +15,4 @@ jobs:
       contents: write # Required to publish a release
       packages: write # Required to push the docker images
     with:
-      goreleaser-version: "2.16.0"
+      goreleaser-version: "2.18.1"
