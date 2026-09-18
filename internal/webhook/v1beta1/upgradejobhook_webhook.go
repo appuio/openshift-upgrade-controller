@@ -15,12 +15,9 @@ import (
 	upgradejobhookv1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 
 	ctrl "sigs.k8s.io/controller-runtime"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
-
-// log is for logging in this package.
-var upgradejobhooklog = logf.Log.WithName("upgradejobhook-resource")
 
 func SetupUpgradeJobHookWebhookWithManager(mgr ctrl.Manager) error {
 	client := kubernetes.NewForConfigOrDie(mgr.GetConfig())
@@ -48,13 +45,15 @@ func NewUpgradeJobHookCustomValidator(client kubernetes.Interface) *UpgradeJobHo
 var _ admission.Validator[*upgradejobhookv1beta1.UpgradeJobHook] = &UpgradeJobHookCustomValidator{}
 
 func (v *UpgradeJobHookCustomValidator) ValidateCreate(ctx context.Context, hook *upgradejobhookv1beta1.UpgradeJobHook) (admission.Warnings, error) {
-	upgradejobhooklog.Info("validate create", "name", hook.Name)
+	l := log.FromContext(ctx).WithName("UpgradeJobHook.Validation")
+	l.Info("validate create", "name", hook.Name)
 	return nil, v.validate(ctx, hook)
 }
 
 // ValidateUpdate implements admission.Validator.
 func (v *UpgradeJobHookCustomValidator) ValidateUpdate(ctx context.Context, oldHook, newHook *upgradejobhookv1beta1.UpgradeJobHook) (admission.Warnings, error) {
-	upgradejobhooklog.Info("validate update", "name", newHook.Name)
+	l := log.FromContext(ctx).WithName("UpgradeJobHook.Validation")
+	l.Info("validate update", "name", newHook.Name)
 
 	// Skip the dry-run when the template is untouched — this covers the
 	// controller's own status/finalizer PATCHes. Caveat: hooks that predate
@@ -121,6 +120,9 @@ func (v *UpgradeJobHookCustomValidator) validate(ctx context.Context, r *upgrade
 				Field:   "spec.template." + c.Field,
 			})
 		}
+		l := log.FromContext(ctx).WithName("UpgradeJobHook.Validation")
+		l.Info("denied: job template invalid",
+			"name", r.Name, "causes", len(causes))
 		return &apierrors.StatusError{ErrStatus: metav1.Status{
 			Code:    422,
 			Reason:  metav1.StatusReasonInvalid,
