@@ -12,8 +12,9 @@ You’ll need a Kubernetes cluster to run against. You can use [KIND](https://si
 
 ```sh
 # To simulate an OpenShift cluster
-kubectl apply -f https://raw.githubusercontent.com/openshift/api/refs/heads/release-4.16/config/v1/zz_generated.crd-manifests/0000_00_cluster-version-operator_01_clusterversions-Default.crd.yaml
-kubectl apply -f https://raw.githubusercontent.com/openshift/api/refs/heads/release-4.16/machineconfiguration/v1/zz_generated.crd-manifests/0000_80_machine-config_01_machineconfigpools-Default.crd.yaml
+kubectl apply -f https://raw.githubusercontent.com/openshift/api/refs/heads/release-4.21/config/v1/zz_generated.crd-manifests/0000_00_cluster-version-operator_01_clusterversions-Default.crd.yaml
+kubectl apply -f https://raw.githubusercontent.com/openshift/api/refs/heads/release-4.21/machineconfiguration/v1/zz_generated.crd-manifests/0000_80_machine-config_01_machineconfigpools-Default.crd.yaml
+kubectl apply -f https://raw.githubusercontent.com/openshift/api/refs/heads/release-4.21/machine/v1beta1/zz_generated.crd-manifests/0000_10_machine-api_01_machines-Default.crd.yaml
 
 # interactive cluster version operator simulation
 go run ./sim
