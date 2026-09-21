@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -53,7 +54,7 @@ func (v *UpgradeJobHookCustomValidator) ValidateCreate(ctx context.Context, hook
 // ValidateUpdate implements admission.Validator.
 func (v *UpgradeJobHookCustomValidator) ValidateUpdate(ctx context.Context, oldHook, newHook *upgradejobhookv1beta1.UpgradeJobHook) (admission.Warnings, error) {
 	l := log.FromContext(ctx).WithName("UpgradeJobHook.Validation")
-	l.Info("validate update", "name", newHook.Name)
+	l.Info("validate update")
 
 	// Skip the dry-run when the template is untouched — this covers the
 	// controller's own status/finalizer PATCHes. Caveat: hooks that predate
@@ -75,6 +76,8 @@ func (v *UpgradeJobHookCustomValidator) ValidateDelete(_ context.Context, _ *upg
 // (defaulting, selector generation, validation, quota, other webhooks) and
 // nothing is persisted.
 func (v *UpgradeJobHookCustomValidator) validate(ctx context.Context, r *upgradejobhookv1beta1.UpgradeJobHook) error {
+	l := log.FromContext(ctx).WithName("UpgradeJobHook.validate")
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: r.Name,
@@ -120,13 +123,11 @@ func (v *UpgradeJobHookCustomValidator) validate(ctx context.Context, r *upgrade
 				Field:   "spec.template." + c.Field,
 			})
 		}
-		l := log.FromContext(ctx).WithName("UpgradeJobHook.Validation")
-		l.Info("denied: job template invalid",
-			"name", r.Name, "causes", len(causes))
+		l.Info("denied: job template invalid", "causes", causes, "upstream_error", err)
 		return &apierrors.StatusError{ErrStatus: metav1.Status{
-			Code:    422,
+			Code:    http.StatusUnprocessableEntity,
 			Reason:  metav1.StatusReasonInvalid,
-			Message: "Job creation from template would fail.",
+			Message: fmt.Sprintf("Job creation from template would fail. (Upstream error: %s)", err.Error()),
 			Details: &metav1.StatusDetails{Causes: causes},
 		}}
 	default:
