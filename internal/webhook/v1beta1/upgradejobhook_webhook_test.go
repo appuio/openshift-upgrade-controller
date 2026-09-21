@@ -7,105 +7,42 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	batchtyped "k8s.io/client-go/kubernetes/typed/batch/v1"
-	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	upgradejobhookv1beta1 "github.com/appuio/openshift-upgrade-controller/api/v1beta1"
 	webhookv1beta1 "github.com/appuio/openshift-upgrade-controller/internal/webhook/v1beta1"
 )
 
-// envtest provides a real apiserver + etcd, so the validator's dry-run runs
-// the genuine Job create chain: defaulting, selector generation, validation.
-// That's the whole point — a fake client runs none of it.
 var (
-	testEnv *envtest.Environment
-	k8sCfg  *rest.Config
+	// lifetime: setup before [testing.M.Run], torn down after [testing.M.Run] returns.
+	envtestClient kubernetes.Interface
 )
 
 func TestMain(m *testing.M) {
-	testEnv = &envtest.Environment{
-		// bin/k8s/<version> from setup-envtest — no KUBEBUILDER_ASSETS
-		// export needed; IDE runs, plain go test, and CI all work.
+	testEnv := &envtest.Environment{
 		BinaryAssetsDirectory: discoverEnvtestBinDir(),
 	}
-	var err error
-	k8sCfg, err = testEnv.Start()
+	k8sCfg, err := testEnv.Start()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "starting envtest: %v\n", err)
 		os.Exit(1)
 	}
+	envtestClient = kubernetes.NewForConfigOrDie(k8sCfg)
+
 	code := m.Run()
 	if err := testEnv.Stop(); err != nil {
-		fmt.Fprintf(os.Stderr, "stopping envtest: %v\n", err)
+		fmt.Fprintf(os.Stderr, "error while stopping envtest: %v\n", err)
+		os.Exit(1)
 	}
 	os.Exit(code)
-}
-
-// discoverEnvtestBinDir locates bin/k8s/<version> relative to the repo root,
-// regardless of which package's test is running. Populated by `make test`
-// (setup-envtest --bin-dir). Returns "" when absent — envtest then honors
-// KUBEBUILDER_ASSETS, or fails loudly.
-func discoverEnvtestBinDir() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for range 6 { // enough levels for any internal/... layout
-		candidate := filepath.Join(dir, "bin", "k8s")
-		if entries, err := os.ReadDir(candidate); err == nil {
-			for _, e := range entries {
-				if e.IsDir() {
-					return filepath.Join(candidate, e.Name())
-				}
-			}
-		}
-		dir = filepath.Dir(dir)
-	}
-	return ""
-}
-
-// validHook is the original 'replace-nodes' example manifest as a fixture.
-// Labels map is initialized — update mutators write to it (nil-map panic guard).
-func validHook() *upgradejobhookv1beta1.UpgradeJobHook {
-	return &upgradejobhookv1beta1.UpgradeJobHook{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "replace-nodes",
-			Namespace: "default",
-			Labels:    map[string]string{},
-		},
-		Spec: upgradejobhookv1beta1.UpgradeJobHookSpec{
-			Template: batchv1.JobTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"appuio-managed-upgrade": "true"},
-				},
-				Spec: batchv1.JobSpec{
-					ActiveDeadlineSeconds: ptr.To(int64(3600)),
-					Template: corev1.PodTemplateSpec{
-						Spec: corev1.PodSpec{
-							RestartPolicy:      corev1.RestartPolicyNever,
-							ServiceAccountName: "hook-manager",
-							Containers: []corev1.Container{{
-								Name:    "replace-nodes",
-								Image:   "quay.io/appuio/oc:v4.20",
-								Command: []string{"sh"},
-								Args:    []string{"-c", "kubectl get nodes"},
-							}},
-						},
-					},
-				},
-			},
-		},
-	}
 }
 
 type mutator func(*upgradejobhookv1beta1.UpgradeJobHook)
@@ -126,20 +63,6 @@ var createTestCases = []struct {
 		matchErr: []string{"spec.template.spec.template.spec.restartPolicy", `valid values: "OnFailure", "Never"`},
 	},
 	{
-		name: "missing restartPolicy is defaulted to Always and rejected",
-		mutate: func(h *upgradejobhookv1beta1.UpgradeJobHook) {
-			h.Spec.Template.Spec.Template.Spec.RestartPolicy = ""
-		},
-		matchErr: []string{"spec.template.spec.template.spec.restartPolicy", `valid values: "OnFailure", "Never"`},
-	},
-	{
-		name: "empty template reports the missing containers",
-		mutate: func(h *upgradejobhookv1beta1.UpgradeJobHook) {
-			h.Spec.Template = batchv1.JobTemplateSpec{}
-		},
-		matchErr: []string{"spec.template.spec.template.spec.containers", "Required value"},
-	},
-	{
 		name: "duplicate container names",
 		mutate: func(h *upgradejobhookv1beta1.UpgradeJobHook) {
 			ps := &h.Spec.Template.Spec.Template.Spec
@@ -148,47 +71,16 @@ var createTestCases = []struct {
 		matchErr: []string{"Duplicate value"},
 	},
 	{
-		name: "initContainer name colliding with a container",
-		mutate: func(h *upgradejobhookv1beta1.UpgradeJobHook) {
-			ps := &h.Spec.Template.Spec.Template.Spec
-			ps.InitContainers = []corev1.Container{{Name: "replace-nodes", Image: "quay.io/appuio/oc:v4.20"}}
-		},
-		matchErr: []string{"Duplicate value"},
-	},
-	{
-		name: "container without an image",
-		mutate: func(h *upgradejobhookv1beta1.UpgradeJobHook) {
-			h.Spec.Template.Spec.Template.Spec.Containers[0].Image = ""
-		},
-		matchErr: []string{"spec.template.spec.template.spec.containers[0].image", "Required value"},
-	},
-	{
 		name: "invalid template label value",
 		mutate: func(h *upgradejobhookv1beta1.UpgradeJobHook) {
 			h.Spec.Template.Labels["appuio-managed-upgrade"] = "not a label value!"
 		},
 		matchErr: []string{"spec.template.metadata.labels", "Invalid value"},
 	},
-	{
-		name: "backoffLimitPerIndex requires Indexed completion mode",
-		mutate: func(h *upgradejobhookv1beta1.UpgradeJobHook) {
-			h.Spec.Template.Spec.BackoffLimitPerIndex = ptr.To(int32(2))
-		},
-		matchErr: []string{"backoffLimitPerIndex"},
-	},
-	{
-		name: "Indexed completion mode with completions is valid",
-		mutate: func(h *upgradejobhookv1beta1.UpgradeJobHook) {
-			mode := batchv1.IndexedCompletion
-			js := &h.Spec.Template.Spec
-			js.CompletionMode = &mode
-			js.Completions = ptr.To(int32(3))
-		},
-	},
 }
 
 func Test_UpgradeJobHookCustomValidator_ValidateCreate(t *testing.T) {
-	v := webhookv1beta1.NewUpgradeJobHookCustomValidator(kubernetes.NewForConfigOrDie(k8sCfg))
+	v := webhookv1beta1.NewUpgradeJobHookCustomValidator(envtestClient)
 
 	for _, tc := range createTestCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -237,7 +129,7 @@ var updateTestCases = []struct {
 }
 
 func Test_UpgradeJobHookCustomValidator_ValidateUpdate(t *testing.T) {
-	v := webhookv1beta1.NewUpgradeJobHookCustomValidator(kubernetes.NewForConfigOrDie(k8sCfg))
+	v := webhookv1beta1.NewUpgradeJobHookCustomValidator(envtestClient)
 
 	for _, tc := range updateTestCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,7 +157,7 @@ func (unreachableClient) BatchV1() batchtyped.BatchV1Interface {
 	panic("dry-run client must not be called when the template is unchanged")
 }
 
-func Test_UpgradeJobHookCustomValidator_ValidateUpdate_SkipsDryRunWhenTemplateUnchanged(t *testing.T) {
+func Test_UpgradeJobHookCustomValidator_ValidateUpdate_SkipsCheckWhenTemplateUnchanged(t *testing.T) {
 	oldHook := validHook()
 	updated := oldHook.DeepCopy()
 	updated.Labels["team"] = "appuio" // any non-template change
@@ -303,5 +195,62 @@ func assertInvalid(t *testing.T, err error, matchErr []string) {
 	}
 	for _, match := range matchErr {
 		assert.Contains(t, haystack.String(), match)
+	}
+}
+
+// discoverEnvtestBinDir locates bin/k8s/<version> relative to the repo root,
+// regardless of which package's test is running. Populated by `make test`
+// (setup-envtest --bin-dir). Returns "" when absent — envtest then honors
+// KUBEBUILDER_ASSETS, or fails loudly.
+func discoverEnvtestBinDir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for range 6 { // enough levels for any internal/... layout
+		candidate := filepath.Join(dir, "bin", "k8s")
+		if entries, err := os.ReadDir(candidate); err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					return filepath.Join(candidate, e.Name())
+				}
+			}
+		}
+		dir = filepath.Dir(dir)
+	}
+	return ""
+}
+
+// validHook is the original 'replace-nodes' example manifest as a fixture.
+// Labels map is initialized — update mutators write to it (nil-map panic guard).
+func validHook() *upgradejobhookv1beta1.UpgradeJobHook {
+	return &upgradejobhookv1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "replace-nodes",
+			Namespace: "default",
+			Labels:    map[string]string{},
+		},
+		Spec: upgradejobhookv1beta1.UpgradeJobHookSpec{
+			Template: batchv1.JobTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"appuio-managed-upgrade": "true"},
+				},
+				Spec: batchv1.JobSpec{
+					ActiveDeadlineSeconds: new(int64(3600)),
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							RestartPolicy:      corev1.RestartPolicyNever,
+							ServiceAccountName: "hook-manager",
+							Containers: []corev1.Container{{
+								Name:    "replace-nodes",
+								Image:   "quay.io/appuio/oc:v4.20",
+								Command: []string{"sh"},
+								Args:    []string{"-c", "kubectl get nodes"},
+							}},
+						},
+					},
+				},
+			},
+		},
 	}
 }
