@@ -2,7 +2,7 @@ module github.com/appuio/openshift-upgrade-controller
 
 go 1.26.4
 
-require github.com/openshift/api v0.0.0-20260105154426-319dc2e49203 // release-4.18
+require github.com/openshift/api v0.0.0-20260925090845-44bef346c3f0 // release-4.18
 
 require (
 	dario.cat/mergo v1.0.2
