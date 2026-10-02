@@ -2,7 +2,7 @@ module github.com/appuio/openshift-upgrade-controller
 
 go 1.26.4
 
-require github.com/openshift/api v0.0.0-20260105154426-319dc2e49203 // release-4.18
+require github.com/openshift/api v0.0.0-20261002115817-f8795cdde518 // release-4.18
 
 require (
 	dario.cat/mergo v1.0.2
@@ -15,8 +15,8 @@ require (
 	go.uber.org/multierr v1.11.0
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b
 	golang.org/x/mod v0.39.0
-	k8s.io/api v0.37.0
-	k8s.io/apimachinery v0.37.0
+	k8s.io/api v0.37.1
+	k8s.io/apimachinery v0.37.1
 	k8s.io/client-go v0.37.0
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd
 	sigs.k8s.io/controller-runtime v0.24.1
@@ -113,7 +113,7 @@ require (
 	k8s.io/gengo/v2 v2.0.0-20260408192533-25e2208e0dc3 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
-	k8s.io/streaming v0.37.0 // indirect
+	k8s.io/streaming v0.37.1 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.36.0 // indirect
 	sigs.k8s.io/controller-runtime/tools/setup-envtest v0.25.1 // indirect
 	sigs.k8s.io/controller-tools v0.22.0 // indirect
