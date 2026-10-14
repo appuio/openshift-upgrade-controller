@@ -41,6 +41,8 @@ const (
 	UpgradeJobReasonUpgradeWithdrawn = "UpgradeWithdrawn"
 	// UpgradeJobReasonHookFailed is used when a hook failed
 	UpgradeJobReasonHookFailed = "HookFailed"
+	// UpgradeJobReasonHookRequestedSkip is used when a hook uses PodFailurePolicy to request an upgrade skip
+	UpgradeJobReasonHookRequestedSkip = "HookRequestedSkip"
 	// UpgradeJobReasonStarted is used when a step of the upgrade job was started
 	UpgradeJobReasonStarted = "Started"
 	// UpgradeJobReasonSucceeded is used when a step of the upgrade job did succeed
@@ -196,14 +198,17 @@ type HookJobTracker struct {
 	Status HookJobTrackerStatus `json:"status,omitempty"`
 	// Message is the message for the status
 	Message string `json:"message,omitempty"`
+	// Reason is the reason for the status
+	Reason string `json:"reason,omitempty"`
 }
 
 type HookJobTrackerStatus string
 
 const (
-	HookJobTrackerStatusComplete HookJobTrackerStatus = "complete"
-	HookJobTrackerStatusFailed   HookJobTrackerStatus = "failed"
-	HookJobTrackerStatusActive   HookJobTrackerStatus = "active"
+	HookJobTrackerStatusComplete         HookJobTrackerStatus = "complete"
+	HookJobTrackerStatusFailed           HookJobTrackerStatus = "failed"
+	HookJobTrackerStatusActive           HookJobTrackerStatus = "active"
+	HookJobTrackerReasonPodFailurePolicy                      = "PodFailurePolicy"
 )
 
 //+kubebuilder:object:root=true

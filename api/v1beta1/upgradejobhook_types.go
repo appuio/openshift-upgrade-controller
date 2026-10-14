@@ -20,8 +20,18 @@ var eventsInfluencingOutcome = []UpgradeEvent{
 	EventMachineConfigPoolUnpause,
 }
 
+// eventsAllowingSkip is the list of events during which an upgrade can still end up getting skipped (e.g. due to hooks).
+var eventsAllowingSkip = []UpgradeEvent{
+	EventCreate,
+	EventStart,
+}
+
 func (e UpgradeEvent) InfluencesOutcome() bool {
 	return slices.Contains(eventsInfluencingOutcome, e)
+}
+
+func (e UpgradeEvent) CanSkipUpdate() bool {
+	return slices.Contains(eventsAllowingSkip, e)
 }
 
 const (
@@ -113,6 +123,13 @@ type UpgradeJobHookSpec struct {
 	// This is currently only informational, but can be used to make decisions in jobs.
 	// The default is `false`.
 	Disruptive bool `json:"disruptive,omitempty"`
+	// PodFailurePolicySkipsUpgrade defines whether this hook can cause the current upgrade to be skipped
+	// by failing due to a PodFailurePolicy defined in the job template.
+	// If set to true, then a job failure with reason `PodFailurePolicy` is interpreted as a request to
+	// skip the upgrade, and causes the UpgradeJob to be aborted with reason `HookRequestedSkip`.
+	// Skipping the upgrade in this way is only possible if the hook runs before the cluster version is modified.
+	// The default is `false`.
+	PodFailurePolicySkipsUpgrade bool `json:"podFailurePolicySkipsUpgrade,omitempty"`
 	// Selector is the label selector that determines which upgrade jobs the hook is executed for.
 	Selector metav1.LabelSelector `json:"selector,omitempty"`
 	// Template is the job template that is executed.
