@@ -541,6 +541,7 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 	activeJobs := []string{}
 	errors := []error{}
 	failedJobs := []string{}
+	jobsRequestingUpgradeSkip := []string{}
 	for _, hook := range hooks {
 		jobs, err := r.jobForUpgradeJobAndHook(ctx, uj, hook, event, trackingKey, addEventInfo, hookJobMeta{MatchesDisruptiveHooks: hasMatchingDisruptiveHook})
 		if err != nil {
@@ -554,10 +555,16 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 				continue
 			}
 
-			if job.Status == managedupgradev1beta1.HookJobTrackerStatusFailed && hook.Spec.GetFailurePolicy() == managedupgradev1beta1.FailurePolicyIgnore {
-				l.Info("hook failed but failure policy is ignore", "hook", hook.Name, "message", job.Message)
-			} else if job.Status == managedupgradev1beta1.HookJobTrackerStatusFailed {
-				failedJobs = append(failedJobs, fmt.Sprintf("hook %q failed: %s", hook.Name, job.Message))
+			if job.Status == managedupgradev1beta1.HookJobTrackerStatusFailed {
+				// NOTE(aa) There's a KEP to change the PodFailurePolicy reason to include the name of the specific policy that caused the failure (`PodFailurePolicy_<name>`).
+				// Prefix checking will still work even if that gets implemented.
+				if hook.Spec.PodFailurePolicySkipsUpgrade && strings.HasPrefix(job.Reason, managedupgradev1beta1.HookJobTrackerReasonPodFailurePolicy) {
+					jobsRequestingUpgradeSkip = append(jobsRequestingUpgradeSkip, fmt.Sprintf("hook %q caused upgrade skip: %s", hook.Name, job.Message))
+				} else if hook.Spec.GetFailurePolicy() == managedupgradev1beta1.FailurePolicyIgnore {
+					l.Info("hook failed but failure policy is ignore", "hook", hook.Name, "message", job.Message)
+				} else {
+					failedJobs = append(failedJobs, fmt.Sprintf("hook %q failed: %s", hook.Name, job.Message))
+				}
 			}
 		}
 	}
@@ -580,8 +587,21 @@ func (r *UpgradeJobReconciler) executeHooks(ctx context.Context, uj *managedupgr
 			Message: strings.Join(failedJobs, ", "),
 		})
 		return false, r.Status().Update(ctx, uj)
-	} else if len(failedJobs) > 0 {
-		l.Info("hooks failed but event does not influence outcome", "failedJobs", failedJobs, "jobAlreadyFinished", jobFinished)
+	} else if len(jobsRequestingUpgradeSkip) > 0 && event.CanSkipUpdate() && !jobFinished {
+		r.setStatusCondition(&uj.Status.Conditions, metav1.Condition{
+			Type:    managedupgradev1beta1.UpgradeJobConditionSucceeded,
+			Status:  metav1.ConditionTrue,
+			Reason:  managedupgradev1beta1.UpgradeJobReasonHookRequestedSkip,
+			Message: strings.Join(jobsRequestingUpgradeSkip, ", "),
+		})
+		return false, r.Status().Update(ctx, uj)
+	} else {
+		if len(failedJobs) > 0 {
+			l.Info("hooks failed but event does not influence outcome", "failedJobs", failedJobs, "jobAlreadyFinished", jobFinished)
+		}
+		if len(jobsRequestingUpgradeSkip) > 0 {
+			l.Info("hooks requested upgrade skip but skip is not possible at this point", "jobsRequestingUpgradeSkip", jobsRequestingUpgradeSkip, "jobAlreadyFinished", jobFinished)
+		}
 	}
 
 	return true, nil
@@ -608,13 +628,14 @@ func (r *UpgradeJobReconciler) jobForUpgradeJobAndHook(
 	jobStatus := findTrackedHookJob(hook.Name, string(event), trackingKey, *uj)
 	slices.Grow(jobStatus, len(jobs.Items))
 	for _, job := range jobs.Items {
-		st, msg := hookStatusFromJob(job)
+		st, msg, rsn := hookStatusFromJob(job)
 		jobStatus = append(jobStatus, managedupgradev1beta1.HookJobTracker{
 			HookEvent:          string(event),
 			TrackingKey:        trackingKey,
 			UpgradeJobHookName: hook.Name,
 			Status:             st,
 			Message:            msg,
+			Reason:             rsn,
 		})
 	}
 
@@ -819,7 +840,7 @@ func (r *UpgradeJobReconciler) trackHookJobs(ctx context.Context, req ctrl.Reque
 			UpgradeJobHookName: j.Labels[hookJobTrackingLabelUpgradeJobHook],
 		}
 
-		s.Status, s.Message = hookStatusFromJob(j)
+		s.Status, s.Message, s.Reason = hookStatusFromJob(j)
 
 		tr = append(tr, s)
 	}
@@ -858,13 +879,14 @@ func (r *UpgradeJobReconciler) trackHookJobs(ctx context.Context, req ctrl.Reque
 	return multierr.Combine(errs...)
 }
 
-func hookStatusFromJob(j batchv1.Job) (status managedupgradev1beta1.HookJobTrackerStatus, msg string) {
+func hookStatusFromJob(j batchv1.Job) (status managedupgradev1beta1.HookJobTrackerStatus, msg string, rsn string) {
 	status = managedupgradev1beta1.HookJobTrackerStatusActive
 	if isJobFinished(j) {
 		status = managedupgradev1beta1.HookJobTrackerStatusComplete
 		if c := jobFailedCondition(j); c != nil {
 			status = managedupgradev1beta1.HookJobTrackerStatusFailed
 			msg = c.Message
+			rsn = c.Reason
 		}
 	}
 	return
