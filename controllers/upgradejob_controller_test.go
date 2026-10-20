@@ -631,7 +631,7 @@ func Test_UpgradeJobReconciler_Reconcile_HookRequestsSkip(t *testing.T) {
 
 	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, noTrackingKey, true, true)
 
-	// _, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
+	_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
 	require.NoError(t, err)
 	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 	require.True(t,
