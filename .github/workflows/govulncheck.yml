@@ -32,6 +32,14 @@ jobs:
         env:
           GOEXPERIMENT: jsonv2
 
+      - name: Deduplicate SARIF stacks
+        # Work around https://github.com/golang/go/issues/81953.
+        # SARIF requires unique stacks within each result.
+        run: |
+          jq '(.runs[].results[] | select(has("stacks")) | .stacks) |= unique' \
+            govulncheck.sarif > govulncheck-normalized.sarif
+          mv govulncheck-normalized.sarif govulncheck.sarif
+
       - name: Upload SARIF File
         uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:

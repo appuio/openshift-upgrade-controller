@@ -372,6 +372,9 @@ spec:
                     message:
                       description: Message is the message for the status
                       type: string
+                    reason:
+                      description: Reason is the reason for the status
+                      type: string
                     status:
                       description: Status is the status of the hook
                       type: string
