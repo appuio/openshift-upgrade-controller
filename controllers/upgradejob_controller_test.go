@@ -789,7 +789,7 @@ func Test_UpgradeJobReconciler_Reconcile_HookFailsWithPFP(t *testing.T) {
 	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
 	require.True(t,
 		apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed),
-		"failed hook, even if failed with PodFailurePolicy, should mark job as failed",
+		"when skip is disabled, a hook failing with PodFailurePolicy should mark job as failed",
 	)
 
 	require.NoError(t, c.Delete(ctx, upgradeJob))
