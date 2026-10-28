@@ -14,7 +14,14 @@ spec:
     singular: upgradejob
   scope: Namespaced
   versions:
-  - name: v1beta1
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type == "Succeeded")].reason
+      name: Success
+      type: string
+    - jsonPath: .status.conditions[?(@.type == "Failed")].reason
+      name: Failure
+      type: string
+    name: v1beta1
     schema:
       openAPIV3Schema:
         description: UpgradeJob is the Schema for the upgradejobs API

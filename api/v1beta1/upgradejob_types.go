@@ -213,6 +213,8 @@ const (
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:printcolumn:name="Success",type=string,JSONPath=`.status.conditions[?(@.type == "Succeeded")].reason`
+//+kubebuilder:printcolumn:name="Failure",type=string,JSONPath=`.status.conditions[?(@.type == "Failed")].reason`
 
 // UpgradeJob is the Schema for the upgradejobs API
 type UpgradeJob struct {

@@ -657,6 +657,154 @@ func Test_UpgradeJobReconciler_Reconcile_HookRequestsSkip(t *testing.T) {
 	require.Empty(t, finalizers, "finalizers should be empty or job deleted")
 }
 
+func Test_UpgradeJobReconciler_Reconcile_HookRequestingSkipFails(t *testing.T) {
+	ctx := log.IntoContext(t.Context(), testr.New(t))
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+			Labels:    map[string]string{"test": "test"},
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-7 * time.Hour)),
+		},
+	}
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "healthcheck",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			PodFailurePolicySkipsUpgrade: true,
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			FailurePolicy: managedupgradev1beta1.FailurePolicyAbort,
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventCreate,
+				managedupgradev1beta1.EventFinish,
+			},
+		},
+	}
+
+	c := controllerClient(t, upgradeJob, upgradeJobHook,
+		&configv1.ClusterVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "version",
+			}})
+
+	subject := &UpgradeJobReconciler{
+		Client: c,
+		Scheme: c.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
+	require.NoError(t, err)
+
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, noTrackingKey, true, false)
+
+	_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
+	require.NoError(t, err)
+	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	require.True(t,
+		apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed),
+		"failed hook, even if requesting upgrade skip due to PodFailurePolicy, should mark job as failed",
+	)
+
+	require.NoError(t, c.Delete(ctx, upgradeJob))
+	// Reconcile can still be called after the job is deleted since we have controller references with finalizers
+	_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
+	require.NoError(t, err)
+	var jobs batchv1.JobList
+	require.NoError(t, c.List(ctx, &jobs))
+	finalizers := []string{}
+	for _, job := range jobs.Items {
+		finalizers = append(finalizers, job.Finalizers...)
+	}
+	require.Empty(t, finalizers, "finalizers should be empty or job deleted")
+}
+
+func Test_UpgradeJobReconciler_Reconcile_HookFailsWithPFP(t *testing.T) {
+	ctx := log.IntoContext(t.Context(), testr.New(t))
+	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
+
+	upgradeJob := &managedupgradev1beta1.UpgradeJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "upgrade-1234-4-5-13",
+			Namespace: "appuio-openshift-upgrade-controller",
+			Labels:    map[string]string{"test": "test"},
+		},
+		Spec: managedupgradev1beta1.UpgradeJobSpec{
+			StartBefore: metav1.NewTime(clock.Now().Add(time.Hour)),
+			StartAfter:  metav1.NewTime(clock.Now().Add(-7 * time.Hour)),
+		},
+	}
+	upgradeJobHook := &managedupgradev1beta1.UpgradeJobHook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "healthcheck",
+			Namespace: "appuio-openshift-upgrade-controller",
+		},
+		Spec: managedupgradev1beta1.UpgradeJobHookSpec{
+			PodFailurePolicySkipsUpgrade: false,
+			Selector: metav1.LabelSelector{
+				MatchLabels: upgradeJob.Labels,
+			},
+			FailurePolicy: managedupgradev1beta1.FailurePolicyAbort,
+			Events: []managedupgradev1beta1.UpgradeEvent{
+				managedupgradev1beta1.EventCreate,
+				managedupgradev1beta1.EventFinish,
+			},
+		},
+	}
+
+	c := controllerClient(t, upgradeJob, upgradeJobHook,
+		&configv1.ClusterVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "version",
+			}})
+
+	subject := &UpgradeJobReconciler{
+		Client: c,
+		Scheme: c.Scheme(),
+
+		Clock: &clock,
+
+		ManagedUpstreamClusterVersionName: "version",
+	}
+
+	_, err := subject.Reconcile(ctx, requestForObject(upgradeJob))
+	require.NoError(t, err)
+
+	checkAndCompleteHook(t, c, subject, upgradeJob, upgradeJobHook, managedupgradev1beta1.EventCreate, noTrackingKey, true, true)
+
+	_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
+	require.NoError(t, err)
+	require.NoError(t, c.Get(ctx, requestForObject(upgradeJob).NamespacedName, upgradeJob))
+	require.True(t,
+		apimeta.IsStatusConditionTrue(upgradeJob.Status.Conditions, managedupgradev1beta1.UpgradeJobConditionFailed),
+		"failed hook, even if failed with PodFailurePolicy, should mark job as failed",
+	)
+
+	require.NoError(t, c.Delete(ctx, upgradeJob))
+	// Reconcile can still be called after the job is deleted since we have controller references with finalizers
+	_, err = subject.Reconcile(ctx, requestForObject(upgradeJob))
+	require.NoError(t, err)
+	var jobs batchv1.JobList
+	require.NoError(t, c.List(ctx, &jobs))
+	finalizers := []string{}
+	for _, job := range jobs.Items {
+		finalizers = append(finalizers, job.Finalizers...)
+	}
+	require.Empty(t, finalizers, "finalizers should be empty or job deleted")
+}
+
 func Test_UpgradeJobReconciler_Reconcile_HookJobContainerEnv(t *testing.T) {
 	clock := mockClock{now: time.Date(2022, 12, 4, 22, 45, 0, 0, time.UTC)}
 
