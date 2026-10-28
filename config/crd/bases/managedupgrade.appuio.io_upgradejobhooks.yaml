@@ -94,6 +94,15 @@ spec:
                 - Abort
                 - Ignore
                 type: string
+              podFailurePolicySkipsUpgrade:
+                description: |-
+                  PodFailurePolicySkipsUpgrade defines whether this hook can cause the current upgrade to be skipped
+                  by failing due to a PodFailurePolicy defined in the job template.
+                  If set to true, then a job failure with reason `PodFailurePolicy` is interpreted as a request to
+                  skip the upgrade, and causes the UpgradeJob to be aborted with reason `HookRequestedSkip`.
+                  Skipping the upgrade in this way is only possible if the hook runs before the cluster version is modified.
+                  The default is `false`.
+                type: boolean
               run:
                 description: |-
                   Run defines if the hook is executed for the `Next` or `All` jobs.
