@@ -7,7 +7,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/go-logr/logr v1.4.4
 	github.com/itchyny/gojq v0.12.19
-	github.com/openshift/api v0.0.0-20260105154426-319dc2e49203 // release-4.18
+	github.com/openshift/api v0.0.0-20261031042726-f677639a402f // release-4.18
 	github.com/prometheus/client_golang v1.25.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.12.1
